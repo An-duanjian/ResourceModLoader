@@ -1,5 +1,6 @@
 ﻿using System;
 using System.IO;
+using System.Reflection.Metadata;
 using AddressablesTools;
 using AddressablesTools.Binary;
 using AddressablesTools.Catalog;
@@ -16,14 +17,21 @@ namespace ModLoader
             if (skip)
             {
                 Console.WriteLine("当前状态无法进行该操作，请先启动游戏下载资源");
+                Console.WriteLine("按任意键退出程序");
+                Console.ReadKey();
                 return;
             }
             if(savePath == "" || ccd == null)
             {
+                Console.WriteLine("按任意键退出程序");
+                Console.ReadKey();
                 return;
             }
             ProcessMods();
+            ApplyAll();
             Save();
+            Console.WriteLine("按任意键退出程序");
+            Console.ReadKey();
         }
         static void StartGame()
         {
@@ -44,8 +52,9 @@ namespace ModLoader
         static string basePath = "";
         static string savePath = "";
         static string executable = "";
-        static string referenceBundle = "";
         static bool skip = false;
+        static BundleScan scan;
+        static List<Tuple<string, string, string,string>> collected = new List<Tuple<string,string, string, string>>();
         static Dictionary<String,ResourceLocation> generatedAbDict = new Dictionary<String,ResourceLocation>();
         static void Init()
         {
@@ -83,7 +92,6 @@ namespace ModLoader
             }
             Console.WriteLine($"{appData[0]} / {appData[1]} ");
             string presistDir = Path.Combine(localPath, appData[0], appData[1], "com.unity.addressables");
-            referenceBundle = Path.Combine(currentPath,"ref.bundle");
 
 
             string addressableSettings = File.ReadAllText(Path.Combine(currentPath, appName + "_Data", "StreamingAssets", "aa", "settings.json"));
@@ -105,12 +113,13 @@ namespace ModLoader
                 return;
             }
             string catalogFile = Path.Combine(presistDir, "catalog_" + version + ".json.modded_bak");
-            if(lastHash != currentHash || !Path.Exists(catalogFile))
+            if (lastHash != currentHash || !Path.Exists(catalogFile))
             {
                 File.Copy(savePath, catalogFile,true);
             }
             File.Copy(Path.Combine(presistDir, "catalog_" + version + ".hash"), Path.Combine(presistDir, "catalog_" + version + ".hash_modded"), true);
             ccd = AddressablesCatalogFileParser.FromJsonString(File.ReadAllText(catalogFile));
+            scan = new BundleScan(ccd, Path.Combine(currentPath, appName + "_Data"), Path.Combine(presistDir, "AssetBundles"));
         }
         static void Save()
         {
@@ -118,8 +127,10 @@ namespace ModLoader
         }
         static void ApplyMod(string modPath)
         {
+            bool performCommonReplace = true;
             if (File.Exists(Path.Combine(modPath, "replace.txt")))
             {
+                performCommonReplace = false;
                 string[] files = File.ReadAllLines(Path.Combine(modPath, "replace.txt"));
                 foreach (string file in files)
                 {
@@ -130,8 +141,9 @@ namespace ModLoader
                         continue;
                     string name = def[0];
                     string bundle = def[1];
+                    string req = def.Length < 3 ? def[1] : def[2];
                     string bundleFile = Path.Combine(modPath, bundle);
-                    ApplyBundleMod(name, bundleFile);
+                    CollectApplyBundleMod(name, bundleFile,"",req);
                 }
             }
             foreach(var file in Directory.GetFiles(modPath))
@@ -139,7 +151,15 @@ namespace ModLoader
                 if (Path.GetExtension(file).ToLower() == ".png" || Path.GetExtension(file).ToLower() == ".jpg")
                 {
                     string bundle = AB.createImageAbSingle(file);
-                    ApplyBundleMod(Path.GetFileNameWithoutExtension(file), bundle,"d");
+                    CollectApplyBundleMod(Path.GetFileNameWithoutExtension(file), bundle,"d");
+                }
+                if((Path.GetExtension(file).ToLower() == ".bundle"  || Path.GetFileName(file)== "__data") && performCommonReplace)
+                {
+                    var list = scan.CalculateToReplaceItems(file);
+                    foreach(var item in list.Item2)
+                    {
+                        CollectApplyBundleMod(item, file, "" , list.Item1);
+                    }
                 }
             }
             foreach(var dir in Directory.GetDirectories(modPath))
@@ -150,26 +170,50 @@ namespace ModLoader
                 }
             }
         }
-        static void ApplyBundleMod(string name,string bundleFile,string containerRedir = "")
+        static void CollectApplyBundleMod(string name, string bundleFile,string containerRedir= "",string depReq = "")
+        {
+            collected.Add(new Tuple<string, string, string,string>(name, bundleFile, containerRedir,depReq));
+        }
+        static void ApplyAll()
+        {
+            Dictionary<string, string> applied = new Dictionary<string, string>();
+            foreach(var item in collected)
+            {
+                Console.WriteLine($"重定向 {item.Item1} -> {item.Item2}");
+                if (applied.ContainsKey(item.Item1))
+                {
+                    Console.WriteLine($"[W] {item.Item1} 正在被多次patch。上次重定向到 {applied[item.Item1]}");
+                }
+                applied.Add(item.Item1, item.Item2);
+                ApplyBundleMod(item.Item1, item.Item2,item.Item3,item.Item4);
+            }
+        }
+        static void ApplyBundleMod(string name,string bundleFile,string containerRedir = "",string depReq = "")
         {
             if (!Path.Exists(bundleFile))
             {
-                Console.WriteLine($"[W] {bundleFile} not exist");
+                Console.WriteLine($"[W] {bundleFile} 不存在");
                 return;
             }
 
             if (!ccd.Resources.ContainsKey(name))
             {
-                Console.WriteLine($"[W] {name} not found in addressable");
+                Console.WriteLine($"[W] {name} 不在Addressable系统中");
                 return;
             }
 
             foreach (var location in ccd.Resources[name])
             {
-                if (location.ProviderId != "UnityEngine.ResourceManagement.ResourceProviders.BundledAssetProvider")
+                if (location.ProviderId == "UnityEngine.ResourceManagement.ResourceProviders.AssetBundleProvider")
                 {
-                    Console.WriteLine($"[W] When processing {name}");
-                    Console.WriteLine($"[W] Unsupported provider type {location.ProviderId}");
+                    location.InternalId = "file://" + bundleFile;
+                    Console.WriteLine($"Bundle {name} --> {location.InternalId}");
+                    continue;
+                }
+                else if (location.ProviderId != "UnityEngine.ResourceManagement.ResourceProviders.BundledAssetProvider")
+                {
+                    Console.WriteLine($"[W] 处理中 {name}");
+                    Console.WriteLine($"[W] 不支持的提供者类型 {location.ProviderId}");
                     continue;
                 }
                 ResourceLocation? firstDep = null;
@@ -183,16 +227,20 @@ namespace ModLoader
                 }
                 if (firstDep == null)
                 {
-                    Console.WriteLine($"[W] When processing {name}");
-                    Console.WriteLine($"[W] No Dep Found");
+                    Console.WriteLine($"[W] 处理中 {name}");
+                    Console.WriteLine($"[W] 没找到依赖的文件");
+                    continue;
+                }
+                if(depReq != "" && depReq != firstDep.PrimaryKey && "patched." + depReq != firstDep.PrimaryKey)
+                {
                     continue;
                 }
                 var rl = getAbIdFor(bundleFile, firstDep);
 
                 if (rl == null)
                 {
-                    Console.WriteLine($"[W] When processing {name}");
-                    Console.WriteLine($"[W] Fail creating dummy Bundle");
+                    Console.WriteLine($"[W] 处理中 {name}");
+                    Console.WriteLine($"[W] 无法创建虚拟Bundle");
                     continue;
                 }
 
