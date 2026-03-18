@@ -161,7 +161,8 @@ namespace ResourceModLoader
             Array.Sort(dirs);
             foreach (var dir in dirs)
             {
-                if(dir != "." && dir != ".." && dir != "_generated")
+                var dirName = Path.GetFileName(dir);
+                if(dirName != "_generated")
                 {
                     ApplyMod(Path.Combine(modPath,dir), priority);
                 }

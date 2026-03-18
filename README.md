@@ -14,6 +14,8 @@
 
 你可以将各种替换资产的mod拖放到mods文件夹，执行一次resourceModLoader便可使他们生效。删除mod文件后再次执行即可恢复原样。
 
+将本项目的exe文件（可选另一个dll）放到游戏根目录并双击打开即可加载mods文件夹
+
 ## 这个项目能做到什么？
 
 任意修改使用Addressable的资产，可以在一个bundle内修改多个资产。目前只能做到从其他AB中读取。
@@ -27,6 +29,13 @@
 |---resourceModLoader.exe
 |---...._
 ```
+或者
+
+```
+|-AstralParty_CN.exe
+|-resourceModLoader.exe
+```
+如果你需要加载图片作为替换项目，你还需要下载`PVRTexLib.dll`
 2. 运行一次程序或者手动创建mods文件夹
 3. 将AB/zip文件/图片文件放入mods文件夹
 4. 执行resourceModLoader.exe
