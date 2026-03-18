@@ -132,6 +132,23 @@ namespace ResourceModLoader
                     if (hasUnAddressable) break;
                 }
             }
+            else
+            {
+                bundleName = "UNK";
+                foreach (var assetInfo in assetFile.AssetInfos)
+                {
+                    if (assetInfo.GetTypeId(assetFile) == (int)AssetClassID.AssetBundle)
+                        continue;
+                    var bf = manager.GetBaseField(asset, assetInfo);
+                    var nameObj = bf["m_Name"];
+                    if (nameObj.IsDummy)
+                        continue;
+                    var addressableKey = nameObj.AsString;
+                    if (addressableKey == null)
+                        continue;
+                    results.Add($"{nameObj.AsString}");
+                }
+            }
             if (hasUnAddressable || results.Count == 0)
             {
                 results.Clear();

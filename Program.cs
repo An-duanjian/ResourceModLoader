@@ -46,9 +46,7 @@ namespace ResourceModLoader
             ApplyMod(modsDirectory,100);
         }
         static string basePath = "";
-        static string savePath = "";
         static string executable = "";
-        static bool skip = false;
         static BundleScan scan;
         static AddressableMgr addressableMgr;
         static List<Tuple<int,string, string, string,string>> collected = new List<Tuple<int, string,string, string, string>>();
@@ -105,13 +103,10 @@ namespace ResourceModLoader
         {
             bool performCommonReplace = true;
             if (File.Exists(Path.Combine(modPath, "priority.txt")))
-            {
-                try
-                {
-                    priority = int.Parse(File.ReadAllText(Path.Combine(modPath, "priority.txt")));
-                }
-                catch (Exception _) { }
-            }
+                try { priority = int.Parse(File.ReadAllText(Path.Combine(modPath, "priority.txt"))); } catch (Exception _) { }
+            if (File.Exists(Path.Combine(modPath, "优先级.txt")))
+                try { priority = int.Parse(File.ReadAllText(Path.Combine(modPath, "优先级.txt"))); } catch (Exception _) { }
+
             if (File.Exists(Path.Combine(modPath, "replace.txt"))) 
             {
                 performCommonReplace = false;
@@ -127,10 +122,12 @@ namespace ResourceModLoader
                     string bundle = def[1];
                     string req = def.Length < 3 ? def[1] : def[2];
                     string bundleFile = Path.Combine(modPath, bundle);
-                    CollectApplyBundleMod(name, bundleFile,"",req);
+                    CollectApplyBundleMod(name, bundleFile,"",req,priority);
                 }
             }
-            foreach(var file in Directory.GetFiles(modPath))
+            var filesAll = Directory.GetFiles(modPath);
+            Array.Sort(filesAll);
+            foreach (var file in filesAll)
             {
                 if (Path.GetExtension(file).ToLower() == ".png" || Path.GetExtension(file).ToLower() == ".jpg" || Path.GetExtension(file).ToLower() == ".gif")
                 {
@@ -138,15 +135,19 @@ namespace ResourceModLoader
                     {
                         string bundle = AB.createImageAbSingle(file);
                         if (bundle != "")
-                            CollectApplyBundleMod(Path.GetFileNameWithoutExtension(file), bundle, "d");
+                            CollectApplyBundleMod(Path.GetFileNameWithoutExtension(file), bundle, "d","", priority);
                     }
                 }
                 if((Path.GetExtension(file).ToLower() == ".bundle"  || Path.GetFileName(file)== "__data") && performCommonReplace)
                 {
                     var list = scan.CalculateToReplaceItems(file);
+                    if(list.Item1 == "UNK")
+                    {
+                        Log.Warn($"{file} 无法对应到游戏中任何一个资产文件，它可能是一个过期资产。将尝试加载并重定向所有文件，如果游戏异常，优先考虑删除这个文件");
+                    }
                     foreach(var item in list.Item2)
                     {
-                        CollectApplyBundleMod(item, file, "" , list.Item1);
+                        CollectApplyBundleMod(item, file, "" , list.Item1, priority);
                     }
                 }
                 if (Path.GetExtension(file).ToLower() == ".zip")
@@ -156,7 +157,9 @@ namespace ResourceModLoader
                         ApplyMod(tp,priority);
                 }
             }
-            foreach(var dir in Directory.GetDirectories(modPath))
+            var dirs = Directory.GetDirectories(modPath);
+            Array.Sort(dirs);
+            foreach (var dir in dirs)
             {
                 if(dir != "." && dir != ".." && dir != "_generated")
                 {
@@ -205,6 +208,7 @@ namespace ResourceModLoader
                         int maxId = -1;
                         for (int ii = 0; ii < sameId.Count; ii++)
                         {
+                            if (collected[sameId[ii]].Item3 == "UNK") continue;
                             int curEq = Util.TailEqualLen(localPath, collected[sameId[ii]].Item3);
                             if (curEq > maxEq)
                             {
