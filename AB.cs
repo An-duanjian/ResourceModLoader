@@ -8,7 +8,7 @@ using ResourceModLoader;
 using AssetsTools.NET.Texture.TextureDecoders.CrnUnity;
 using System.Security.Cryptography;
 
-namespace ModLoader
+namespace ResourceModLoader
 {
     class AB
     {
@@ -20,14 +20,14 @@ namespace ModLoader
             string bundleName = Path.GetFileNameWithoutExtension(path) + ".bundle";
             if (!Path.Exists(Path.Combine(dirName, "_generated")))
                 Directory.CreateDirectory(Path.Combine(dirName, "_generated"));
-            string pathAb = Path.Combine(dirName,"_generated",bundleName);
+            string pathAb = Path.Combine(dirName, "_generated", bundleName);
             AssetsManager manager = new AssetsManager();
-            BundleFileInstance bundleInst = manager.LoadBundleFile(new MemoryStream(Resource1._ref),"ref.bundle");
+            BundleFileInstance bundleInst = manager.LoadBundleFile(new MemoryStream(Resource1._ref), "ref.bundle");
             AssetsFileInstance assetsInst = manager.LoadAssetsFileFromBundle(bundleInst, 0);
             AssetsFile assetsFile = assetsInst.file;
 
             foreach (var type in Enum.GetValues(typeof(AssetClassID)))
-                if((AssetClassID)type != AssetClassID.AssetBundle)
+                if ((AssetClassID)type != AssetClassID.AssetBundle)
                     assetsFile.GetAssetsOfType((int)type).ForEach(asset => { asset.SetRemoved(); });
             var abFileInfo = assetsFile.GetAssetsOfType(AssetClassID.AssetBundle).First();
             var abFileField = manager.GetBaseField(assetsInst, abFileInfo);
@@ -39,9 +39,8 @@ namespace ModLoader
             abFileInfo.SetNewData(abFileField);
             var baseField = manager.CreateValueBaseField(assetsInst, (int)AssetClassID.Texture2D);
 
-
-            
             var encoded = Encode(path);
+            if (encoded == null) return "";
             int width = encoded.Item1;
             int height = encoded.Item2;
 
@@ -74,7 +73,7 @@ namespace ModLoader
 
             bundleInst.file.BlockAndDirInfo.DirectoryInfos[0].Name = "CAB-" + bundleName;
             bundleInst.file.BlockAndDirInfo.DirectoryInfos[0].SetNewData(assetsFile);
-            while(bundleInst.file.BlockAndDirInfo.DirectoryInfos.Count > 1)
+            while (bundleInst.file.BlockAndDirInfo.DirectoryInfos.Count > 1)
                 bundleInst.file.BlockAndDirInfo.DirectoryInfos.RemoveAt(1);
 
             if (Path.Exists(pathAb))
@@ -85,32 +84,39 @@ namespace ModLoader
             return pathAb;
         }
 
-        private static Tuple<int,int, byte[]> Encode(string path)
+        private static Tuple<int, int, byte[]>? Encode(string path)
         {
-            using PVRTexture texture = new PVRTexture(path);
-            // Check that PVRTexLib loaded the file successfully
-            if (texture.GetTextureDataSize() == 0)
+            try
             {
-                return null;
-            }
-            texture.Flip(PVRTexLibAxis.Y);
-
-            // Decompress texture to the standard RGBA8888 format.
-            ulong RGBA8888 = PVRDefine.PVRTGENPIXELID4('a', 'r', 'g', 'b', 8, 8, 8, 8);
-
-            if (!texture.Transcode(RGBA8888, PVRTexLibVariableType.UnsignedByteNorm, PVRTexLibColourSpace.BT2020))
-            {
-                return null;
-            }
-            unsafe
-            {
-                byte* result = (byte*)texture.GetTextureDataPointer();
-                byte[] resultArr = new byte[texture.GetTextureDataSize()];
-                fixed (byte* ptr = resultArr)
+                using PVRTexture texture = new PVRTexture(path);
+                // Check that PVRTexLib loaded the file successfully
+                if (texture.GetTextureDataSize() == 0)
                 {
-                    Buffer.MemoryCopy(result, ptr, texture.GetTextureDataSize(), texture.GetTextureDataSize());
+                    return null;
                 }
-                return new Tuple<int,int,byte[]>((int)texture.GetTextureWidth(), (int)texture.GetTextureHeight(), resultArr);
+                texture.Flip(PVRTexLibAxis.Y);
+
+                // Decompress texture to the standard RGBA8888 format.
+                ulong RGBA8888 = PVRDefine.PVRTGENPIXELID4('a', 'r', 'g', 'b', 8, 8, 8, 8);
+
+                if (!texture.Transcode(RGBA8888, PVRTexLibVariableType.UnsignedByteNorm, PVRTexLibColourSpace.BT2020))
+                {
+                    return null;
+                }
+                unsafe
+                {
+                    byte* result = (byte*)texture.GetTextureDataPointer();
+                    byte[] resultArr = new byte[texture.GetTextureDataSize()];
+                    fixed (byte* ptr = resultArr)
+                    {
+                        Buffer.MemoryCopy(result, ptr, texture.GetTextureDataSize(), texture.GetTextureDataSize());
+                    }
+                    return new Tuple<int, int, byte[]>((int)texture.GetTextureWidth(), (int)texture.GetTextureHeight(), resultArr);
+                }
+            }
+            catch (Exception ex)
+            {
+                return null;
             }
         }
 

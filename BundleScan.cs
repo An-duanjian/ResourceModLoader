@@ -7,51 +7,68 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace ModLoader
+namespace ResourceModLoader
 {
     class BundleScan
     {
-        private ContentCatalogData ccd;
+        private AddressableMgr ccd;
         string local;
         string cache;
-        Dictionary<string, BundleFileInstance> bundleCache = new Dictionary<string, BundleFileInstance>();
-        Dictionary<string, string> cachePath = new Dictionary<string, string>();
-        Dictionary<string, string> bundlePathMap = new Dictionary<string, string>();
-        AssetsManager manager = new AssetsManager();
-        AssetsManager managerOut = new AssetsManager();
-        public BundleScan(ContentCatalogData ccd, string local, string cache)
+        Dictionary<string, AssetsFileInstance> bundleAssetCache = new Dictionary<string, AssetsFileInstance>();
+        Dictionary<string, string> bundlePathLocal = new Dictionary<string, string>();
+        Dictionary<string, List<Tuple<string, string>>> bundlePathMap = new Dictionary<string, List<Tuple<string, string>>>();
+        public BundleScan(AddressableMgr ccd, string local, string cache)
         {
             this.ccd = ccd;
             this.local = local;
             this.cache = cache;
 
-            Console.WriteLine("正在为缓存目录构建临时索引");
+            Log.Info("正在为缓存目录构建临时索引");
             foreach (var p in Directory.GetDirectories(cache))
             {
                 foreach (var sp in Directory.GetDirectories(p))
                 {
-                    cachePath[Path.GetFileName(sp) + ".bundle"] = Path.Combine(sp, "__data");
-                    bundlePathMap[Path.GetFileName(p) + ".bundle"] = Path.GetFileName(sp) + ".bundle";
+                    bundlePathLocal[Path.GetFileName(sp) + ".bundle"] = Path.Combine(sp, "__data");
+                    RegisterBundlePath(Path.Combine(sp, "__data"), Path.GetFileName(sp) + ".bundle");
                 }
             }
-            Console.WriteLine("正在为游戏资产目录构建临时索引");
+            Log.Info("正在为游戏资产目录构建临时索引");
             foreach (var p in Directory.GetDirectories(Path.Combine(local, "StreamingAssets", "aa")))
             {
                 foreach(var sp in Directory.GetFiles(p))
                 {
                     if (!sp.EndsWith(".bundle")) continue;
-                    var incomingBundle = manager.LoadBundleFile(sp);
-                    var asset = manager.LoadAssetsFileFromBundle(incomingBundle, 0);
-                    var assetFile = asset.file;
-                    var abdef = assetFile.GetAssetsOfType(AssetClassID.AssetBundle).First();
-                    var fab = manager.GetBaseField(asset, abdef);
-                    var bundleName = fab["m_Name"].AsString;
-                    bundlePathMap[bundleName] = Path.GetFileName(sp);
+                    bundlePathLocal[Path.GetFileName(sp)] = sp;
+                    RegisterBundlePath(sp, Path.GetFileName(sp));
                 }
             }
         }
+        private void RegisterBundlePath(string path,string bundleFileName)
+        {
+            AssetsManager manager = new AssetsManager();
+            var incomingBundle = manager.LoadBundleFile(path);
+            var asset = manager.LoadAssetsFileFromBundle(incomingBundle, 0);
+            var assetFile = asset.file;
+            var abdef = assetFile.GetAssetsOfType(AssetClassID.AssetBundle).First();
+            var fab = manager.GetBaseField(asset, abdef);
+            var bundleName = fab["m_Name"].AsString;
+            string firstNonMetaName = FindFirstNonMetaName(asset, manager);
+            Tuple<string,string> info = new Tuple<string,string>(bundleFileName,firstNonMetaName);
+            if (bundlePathMap.ContainsKey(bundleName))
+            {
+                foreach(var pair in bundlePathMap[bundleName])
+                {
+                    if (pair.Item2 == firstNonMetaName)
+                        Log.Warn($"完全重复项目{pair.Item1}@{pair.Item2} 在 {bundleName}(incoming={bundleFileName})");
+                }
+                bundlePathMap[bundleName].Append(info);
+            }
+            else
+                bundlePathMap[bundleName] = new List<Tuple<string, string>> { info };
+        }
         public Tuple<string, List<string>> CalculateToReplaceItems(string bundlePath)
         {
+            AssetsManager manager = new AssetsManager();
             List<string> results = new List<string>();
 
             var incomingBundle = manager.LoadBundleFile(bundlePath);
@@ -61,14 +78,11 @@ namespace ModLoader
 
             var abdef = assetFile.GetAssetsOfType(AssetClassID.AssetBundle).First();
             var fab = manager.GetBaseField(asset, abdef);
-            var bundleName = fab["m_Name"].AsString;
-            if (bundlePathMap.ContainsKey(bundleName))
-                bundleName = bundlePathMap[bundleName];
+            string bundleName = FindBundleName(fab["m_Name"].AsString, asset, manager);
 
-            var targetBundle = GetBundle(bundleName);
-            if (targetBundle != null)
+            var targetAsset = GetBundle(bundleName);
+            if (targetAsset != null)
             {
-                var targetAsset = managerOut.LoadAssetsFileFromBundle(targetBundle, 0);
                 var targetAssetFile = targetAsset.file;
 
                 foreach (var assetInfo in assetFile.AssetInfos)
@@ -106,7 +120,7 @@ namespace ModLoader
 
                         if (!buf1.Equals(buf2))
                         {
-                            if (!ccd.Resources.ContainsKey(addressableKey))
+                            if (!ccd.IsAddressableName(addressableKey))
                             {
                                 hasUnAddressable = true;
                                 break;
@@ -126,30 +140,68 @@ namespace ModLoader
 
             return new Tuple<string, List<string>>(bundleName, results);
         }
-        public BundleFileInstance? GetBundle(string bundleName)
+        
+        public string FindFirstNonMetaName(AssetsFileInstance asset, AssetsManager manager)
         {
-            if (bundleCache.ContainsKey(bundleName))
-                return bundleCache[bundleName];
-            if (!ccd.Resources.ContainsKey(bundleName))
+            var assetFile = asset.file;
+            foreach (var asf in assetFile.AssetInfos)
+            {
+                if (asf.GetTypeId(assetFile) == (int)AssetClassID.AssetBundle) continue;
+                var tField = manager.GetBaseField(asset, asf);
+                if (tField["m_Name"].IsDummy || tField["m_Name"].TypeName != "string") continue;
+                return tField["m_Name"].AsString;
+            }
+            return "";
+        }
+        public string FindBundleName(string bundleMetaName, AssetsFileInstance af, AssetsManager manager)
+        {
+            if (!bundlePathMap.ContainsKey(bundleMetaName))
+                return bundleMetaName;
+            var list = bundlePathMap[bundleMetaName];
+            if(list.Count == 1)
+                return list[0].Item1;
+            string firstNonMetaName = FindFirstNonMetaName(af, manager);
+            foreach(var d in list)
+            {
+                if(d.Item2 == firstNonMetaName)
+                    return d.Item1;
+            }
+            Log.Warn($"{bundleMetaName}有多个对应，但是无法找到第一个文件名为'{firstNonMetaName}'的对应");
+            return list[0].Item1;
+        }
+        public AssetsFileInstance? GetBundle(string bundleName)
+        {
+            if (bundleAssetCache.ContainsKey(bundleName))
+                return bundleAssetCache[bundleName];
+            if (!ccd.IsAddressableName(bundleName))
                 return null;
-            var rl = ccd.Resources[bundleName];
-            if (rl == null || rl.Count == 0) return null;
+
+            var bundlePath = GetBundleLocalPath(bundleName);
+            if(bundlePath == "") return null;
+            AssetsManager managerOut = new AssetsManager();
+            var bundle = managerOut.LoadBundleFile(bundlePath);
+            bundleAssetCache[bundleName] = managerOut.LoadAssetsFileFromBundle(bundle, 0);
+            return bundleAssetCache[bundleName];
+        }
+
+        public string GetBundleLocalPath(string bundleName)
+        {
+            var rl = ccd.GetFirstAvailableResourceLocationList(bundleName);
+            if (rl == null || rl.Count == 0) return "";
             var bundlePath = rl[0].InternalId;
             if (bundlePath.StartsWith("{App.WebServerConfig.Path}"))
             {
-                if (!cachePath.ContainsKey(bundlePath.Replace("{App.WebServerConfig.Path}\\", "")))
+                if (!this.bundlePathLocal.ContainsKey(bundlePath.Replace("{App.WebServerConfig.Path}\\", "")))
                 {
-                    return null;
+                    return "";
                 }
-                bundlePath = cachePath[bundlePath.Replace("{App.WebServerConfig.Path}\\", "")];
+                bundlePath = this.bundlePathLocal[bundlePath.Replace("{App.WebServerConfig.Path}\\", "")];
             }
             else if (bundlePath.StartsWith("{UnityEngine.AddressableAssets.Addressables.RuntimePath}"))
             {
                 bundlePath = bundlePath.Replace("{UnityEngine.AddressableAssets.Addressables.RuntimePath}", Path.Combine(local, "StreamingAssets", "aa"));
             }
-
-            bundleCache[bundleName] = managerOut.LoadBundleFile(bundlePath);
-            return bundleCache[bundleName];
+            return bundlePath;
         }
     }
 }

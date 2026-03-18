@@ -7,31 +7,28 @@ using AddressablesTools.Catalog;
 using AddressablesTools.Classes;
 using AddressablesTools.JSON;
 
-namespace ModLoader
+namespace ResourceModLoader
 {
     class Program
     {
         static void Main(string[] args)
         {
             Init();
-            if (skip)
+            if (addressableMgr == null)
             {
-                Console.WriteLine("当前状态无法进行该操作，请先启动游戏下载资源");
-                Console.WriteLine("按任意键退出程序");
-                Console.ReadKey();
+                Log.Wait();
                 return;
             }
-            if(savePath == "" || ccd == null)
+            if (addressableMgr.Loaded() == 0)
             {
-                Console.WriteLine("按任意键退出程序");
-                Console.ReadKey();
+                Log.Warn("当前状态无法进行该操作，请先启动游戏下载资源");
+                Log.Wait();
                 return;
             }
             ProcessMods();
             ApplyAll();
-            Save();
-            Console.WriteLine("按任意键退出程序");
-            Console.ReadKey();
+            addressableMgr.Save();
+            Log.Wait();
         }
         static void StartGame()
         {
@@ -46,16 +43,15 @@ namespace ModLoader
             {
                 Directory.CreateDirectory(modsDirectory);
             }
-            ApplyMod(modsDirectory);
+            ApplyMod(modsDirectory,100);
         }
-        static ContentCatalogData ccd;
         static string basePath = "";
         static string savePath = "";
         static string executable = "";
         static bool skip = false;
         static BundleScan scan;
-        static List<Tuple<string, string, string,string>> collected = new List<Tuple<string,string, string, string>>();
-        static Dictionary<String,ResourceLocation> generatedAbDict = new Dictionary<String,ResourceLocation>();
+        static AddressableMgr addressableMgr;
+        static List<Tuple<int,string, string, string,string>> collected = new List<Tuple<int, string,string, string, string>>();
         static void Init()
         {
             string localPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "AppData", "LocalLow"); 
@@ -79,18 +75,18 @@ namespace ModLoader
             }
             if(appName == "")
             {
-                Console.Error.WriteLine("在游戏运行目录下安装该软件");
+                Log.Error("在游戏运行目录下安装该软件");
                 return;
             }
             basePath = currentPath;
             executable = Path.Combine(currentPath, appName + ".exe");
-            Console.WriteLine($"使用 {executable} 作为可执行文件");
+            Log.Debug($"使用 {executable} 作为可执行文件");
             string[] appData = File.ReadAllLines(Path.Combine(currentPath, appName+"_Data","app.info"));
             if(appData.Length < 2) {
-                Console.Error.WriteLine("Appinfo 不合法");
+                Log.Error("Appinfo 不合法");
                 return;
             }
-            Console.WriteLine($"{appData[0]} / {appData[1]} ");
+            Log.Debug($"{appData[0]} / {appData[1]} ");
             string presistDir = Path.Combine(localPath, appData[0], appData[1], "com.unity.addressables");
 
 
@@ -98,37 +94,25 @@ namespace ModLoader
             int offset1 = addressableSettings.IndexOf("/catalog_")+9;
             int offset2 = addressableSettings.IndexOf(".hash",offset1);
             string version = addressableSettings.Substring(offset1, offset2 - offset1);
-            Console.WriteLine($"Game Version {version}");
+            Log.Debug($"Game Version {version}");
 
-            string currentHash = File.ReadAllText(Path.Combine(presistDir, "catalog_" + version + ".hash"));
-            string lastHash = "";
-            if(Path.Exists(Path.Combine(presistDir, "catalog_" + version + ".hash_modded")))
-            {
-                lastHash = File.ReadAllText(Path.Combine(presistDir, "catalog_" + version + ".hash_modded"));
-            }
-            savePath = Path.Combine(presistDir, "catalog_" + version + ".json");
-            if (!Path.Exists(savePath))
-            {
-                skip = true;
-                return;
-            }
-            string catalogFile = Path.Combine(presistDir, "catalog_" + version + ".json.modded_bak");
-            if (lastHash != currentHash || !Path.Exists(catalogFile))
-            {
-                File.Copy(savePath, catalogFile,true);
-            }
-            File.Copy(Path.Combine(presistDir, "catalog_" + version + ".hash"), Path.Combine(presistDir, "catalog_" + version + ".hash_modded"), true);
-            ccd = AddressablesCatalogFileParser.FromJsonString(File.ReadAllText(catalogFile));
-            scan = new BundleScan(ccd, Path.Combine(currentPath, appName + "_Data"), Path.Combine(presistDir, "AssetBundles"));
+            addressableMgr = new AddressableMgr();
+            addressableMgr.Add(Path.Combine(presistDir, "catalog_" + version + ".json"));
+            addressableMgr.Add(Path.Combine(currentPath, appName + "_Data", "StreamingAssets", "aa", "catalog.bundle"));
+            scan = new BundleScan(addressableMgr, Path.Combine(currentPath, appName + "_Data"), Path.Combine(presistDir, "AssetBundles"));
         }
-        static void Save()
-        {
-            File.WriteAllText(savePath, AddressablesCatalogFileParser.ToJsonString(ccd));
-        }
-        static void ApplyMod(string modPath)
+        static void ApplyMod(string modPath,int priority)
         {
             bool performCommonReplace = true;
-            if (File.Exists(Path.Combine(modPath, "replace.txt")))
+            if (File.Exists(Path.Combine(modPath, "priority.txt")))
+            {
+                try
+                {
+                    priority = int.Parse(File.ReadAllText(Path.Combine(modPath, "priority.txt")));
+                }
+                catch (Exception _) { }
+            }
+            if (File.Exists(Path.Combine(modPath, "replace.txt"))) 
             {
                 performCommonReplace = false;
                 string[] files = File.ReadAllLines(Path.Combine(modPath, "replace.txt"));
@@ -148,10 +132,14 @@ namespace ModLoader
             }
             foreach(var file in Directory.GetFiles(modPath))
             {
-                if (Path.GetExtension(file).ToLower() == ".png" || Path.GetExtension(file).ToLower() == ".jpg")
+                if (Path.GetExtension(file).ToLower() == ".png" || Path.GetExtension(file).ToLower() == ".jpg" || Path.GetExtension(file).ToLower() == ".gif")
                 {
-                    string bundle = AB.createImageAbSingle(file);
-                    CollectApplyBundleMod(Path.GetFileNameWithoutExtension(file), bundle,"d");
+                    if (addressableMgr.IsAddressableName(Path.GetFileNameWithoutExtension(file)))
+                    {
+                        string bundle = AB.createImageAbSingle(file);
+                        if (bundle != "")
+                            CollectApplyBundleMod(Path.GetFileNameWithoutExtension(file), bundle, "d");
+                    }
                 }
                 if((Path.GetExtension(file).ToLower() == ".bundle"  || Path.GetFileName(file)== "__data") && performCommonReplace)
                 {
@@ -161,133 +149,95 @@ namespace ModLoader
                         CollectApplyBundleMod(item, file, "" , list.Item1);
                     }
                 }
+                if (Path.GetExtension(file).ToLower() == ".zip")
+                {
+                    string tp = Zip.ExtractAndGetPath(file);
+                    if(tp != "")
+                        ApplyMod(tp,priority);
+                }
             }
             foreach(var dir in Directory.GetDirectories(modPath))
             {
-                if(dir != "." && dir != "..")
+                if(dir != "." && dir != ".." && dir != "_generated")
                 {
-                    ApplyMod(Path.Combine(modPath,dir));
+                    ApplyMod(Path.Combine(modPath,dir), priority);
                 }
             }
         }
-        static void CollectApplyBundleMod(string name, string bundleFile,string containerRedir= "",string depReq = "")
+        static void CollectApplyBundleMod(string name, string bundleFile,string containerRedir= "",string depReq = "",int priority=100)
         {
-            collected.Add(new Tuple<string, string, string,string>(name, bundleFile, containerRedir,depReq));
+            var t = new Tuple<int, string, string, string, string>(priority, name, bundleFile, containerRedir, depReq);
+            if (!collected.Contains(t))
+            {
+                collected.Add(t);
+            }
+        }
+        static void SortAndFilter()
+        {
+            collected.Sort((a, b) => a.Item1 - b.Item1);
+            
+            for(int i = 0; i < collected.Count; i++)
+            {
+                List<int> sameId = new List<int> { i};
+                for(int j=i+1; j < collected.Count; j++)
+                {
+                    if (collected[j].Item2 != collected[i].Item2 || collected[j].Item5 != collected[i].Item5) continue;
+                    if (collected[j].Item1 > collected[i].Item1)
+                    {
+                        collected.RemoveAt(j);
+                        j --;
+                        continue;
+                    }
+                    sameId.Add(j);
+                }
+                if (sameId.Count > 1)
+                {
+                    Log.Debug($"{collected[i].Item2} 有 {sameId.Count} 个优先级相同的备选项");
+                    foreach(int id in sameId)
+                    {
+                        Log.Debug($" |-> {collected[id].Item3}");
+                    }
+                    //对于多个相同优先级的相同项目的Filter
+                    string localPath = scan.GetBundleLocalPath(collected[i].Item5);
+                    if (localPath != "")
+                    {
+                        int maxEq = 0;
+                        int maxId = -1;
+                        for (int ii = 0; ii < sameId.Count; ii++)
+                        {
+                            int curEq = Util.TailEqualLen(localPath, collected[sameId[ii]].Item3);
+                            if (curEq > maxEq)
+                            {
+                                maxEq = curEq;
+                                maxId = ii;
+                            }
+                        }
+                        if (maxEq > 0)
+                        {
+                            Log.Info($" --> 使用 {collected[sameId[maxId]].Item3}来执行重定向");
+                            for (int ii = sameId.Count - 1; ii >= 0; ii--)
+                            {
+                                if (ii != maxId) collected.RemoveAt(sameId[ii]);
+                            }
+                        }
+                    }
+                }
+            }
         }
         static void ApplyAll()
         {
+            SortAndFilter();
             Dictionary<string, string> applied = new Dictionary<string, string>();
             foreach(var item in collected)
             {
-                Console.WriteLine($"重定向 {item.Item1} -> {item.Item2}");
-                if (applied.ContainsKey(item.Item1))
+                Log.Debug($"重定向 {item.Item2} -> {item.Item3}");
+                if (applied.ContainsKey(item.Item2))
                 {
-                    Console.WriteLine($"[W] {item.Item1} 正在被多次patch。上次重定向到 {applied[item.Item1]}");
+                    Log.Warn($"{item.Item2} 正在被多次patch。上次重定向到 {applied[item.Item2]}");
                 }
-                applied.Add(item.Item1, item.Item2);
-                ApplyBundleMod(item.Item1, item.Item2,item.Item3,item.Item4);
+                applied[item.Item2] = item.Item3;
+                addressableMgr.ApplyBundleMod(item.Item2, item.Item3,item.Item4,item.Item5);
             }
-        }
-        static void ApplyBundleMod(string name,string bundleFile,string containerRedir = "",string depReq = "")
-        {
-            if (!Path.Exists(bundleFile))
-            {
-                Console.WriteLine($"[W] {bundleFile} 不存在");
-                return;
-            }
-
-            if (!ccd.Resources.ContainsKey(name))
-            {
-                Console.WriteLine($"[W] {name} 不在Addressable系统中");
-                return;
-            }
-
-            foreach (var location in ccd.Resources[name])
-            {
-                if (location.ProviderId == "UnityEngine.ResourceManagement.ResourceProviders.AssetBundleProvider")
-                {
-                    location.InternalId = "file://" + bundleFile;
-                    Console.WriteLine($"Bundle {name} --> {location.InternalId}");
-                    continue;
-                }
-                else if (location.ProviderId != "UnityEngine.ResourceManagement.ResourceProviders.BundledAssetProvider")
-                {
-                    Console.WriteLine($"[W] 处理中 {name}");
-                    Console.WriteLine($"[W] 不支持的提供者类型 {location.ProviderId}");
-                    continue;
-                }
-                ResourceLocation? firstDep = null;
-                if (location.Dependencies != null)
-                {
-                    firstDep = location.Dependencies.First();
-                }
-                else if (location.DependencyKey != null)
-                {
-                    firstDep = ccd.Resources[location.DependencyKey].First();
-                }
-                if (firstDep == null)
-                {
-                    Console.WriteLine($"[W] 处理中 {name}");
-                    Console.WriteLine($"[W] 没找到依赖的文件");
-                    continue;
-                }
-                if(depReq != "" && depReq != firstDep.PrimaryKey && "patched." + depReq != firstDep.PrimaryKey)
-                {
-                    continue;
-                }
-                var rl = getAbIdFor(bundleFile, firstDep);
-
-                if (rl == null)
-                {
-                    Console.WriteLine($"[W] 处理中 {name}");
-                    Console.WriteLine($"[W] 无法创建虚拟Bundle");
-                    continue;
-                }
-
-
-                if (location.Dependencies != null)
-                {
-                    location.Dependencies.Clear();
-                    location.Dependencies.Add(rl);
-                }
-                else if (location.DependencyKey != null)
-                {
-                    location.DependencyKey = rl.PrimaryKey;
-                }
-
-                if(containerRedir != "")
-                {
-                    location.InternalId = containerRedir; 
-                }
-                Console.WriteLine($"Resource {name} --> {rl.PrimaryKey}");
-            }
-        }
-        static ResourceLocation? getAbIdFor(string path, ResourceLocation reference)
-        {
-            if (generatedAbDict.ContainsKey(path))
-                return generatedAbDict[path];
-
-            var rl = new ResourceLocation();
-            rl.ProviderId = reference.ProviderId;
-            rl.InternalId = "file://" + path;
-            rl.PrimaryKey = "patched." + reference.PrimaryKey;
-            rl.Type = reference.Type;
-            AssetBundleRequestOptions opt = new AssetBundleRequestOptions();
-            opt.Hash = "";
-            opt.BundleName = rl.PrimaryKey;
-            if (reference.Data is WrappedSerializedObject { Object: AssetBundleRequestOptions abro, Type: SerializedType t })
-            {
-                opt.ComInfo = abro.ComInfo;
-                rl.Data = new WrappedSerializedObject(t, opt);
-            }
-            else
-            {
-                return null;
-            }
-
-            ccd.Resources[rl.PrimaryKey] = new List<ResourceLocation> { rl };
-            generatedAbDict[path] = rl;
-            return rl;
         }
     }
 }
