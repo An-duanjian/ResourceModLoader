@@ -166,7 +166,7 @@ namespace ResourceModLoader.Utils
             foreach (string file in bundles)
             {
                 Log.StepProgress("", 1);
-                PatchBundle(manager, assets, file, patched, save + ".temp1",conflictResults);
+                patches.Add(PatchBundle(manager, assets, file, patched, save + ".temp1",conflictResults));
             }
             Log.FinalizeProgress();
 
