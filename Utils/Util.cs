@@ -4,7 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace ResourceModLoader.util
+namespace ResourceModLoader.Utils
 {
     internal class Util
     {

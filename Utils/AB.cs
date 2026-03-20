@@ -7,6 +7,7 @@ using static System.Net.Mime.MediaTypeNames;
 using AssetsTools.NET.Texture.TextureDecoders.CrnUnity;
 using System.Security.Cryptography;
 using System.Reflection.Metadata;
+using ResourceModLoader.Mod;
 
 namespace ResourceModLoader.Utils
 {
@@ -14,17 +15,19 @@ namespace ResourceModLoader.Utils
     {
         public void SetProgress(float progress)
         {
-            Log.StepProgress($"Compressing {progress}");
+            Log.StepProgress($"正在压缩合并结果 {((int)(progress * 100))}%");
         }
     }
     class AB
     {
         private static int PID = 172001;
-        public static string createImageAbSingle(string path)
+        public static string createImageAbSingle(string path,string? fileName)
         {
             int pid = ++PID;
             string dirName = Path.GetDirectoryName(path);
-            string bundleName = Path.GetFileNameWithoutExtension(path) + ".bundle";
+            if (fileName == null)
+                fileName = Path.GetFileNameWithoutExtension(path);
+            string bundleName = fileName + ".bundle";
             if (!Path.Exists(Path.Combine(dirName, "_generated")))
                 Directory.CreateDirectory(Path.Combine(dirName, "_generated"));
             string pathAb = Path.Combine(dirName, "_generated", bundleName);
@@ -51,7 +54,7 @@ namespace ResourceModLoader.Utils
             int width = encoded.Item1;
             int height = encoded.Item2;
 
-            baseField["m_Name"].AsString = Path.GetFileNameWithoutExtension(path);
+            baseField["m_Name"].AsString = fileName;
             AssetTypeValueField m_StreamData = baseField["m_StreamData"];
             m_StreamData["offset"].AsInt = 0;
             m_StreamData["size"].AsInt = 0;
@@ -127,8 +130,9 @@ namespace ResourceModLoader.Utils
             }
         }
 
-        public static void MergeBundles(string originalPath, List<string> bundles, string save)
+        public static List<Tuple<string, string, string>> MergeBundles(string originalPath, List<string> bundles, string save, Action<AssetsManager, AssetsFileInstance[], Dictionary<long, string>[], List<List<Tuple<int, long, byte[]>>>>? post = null)
         {
+            List<Tuple<string, string, string>> conflictResults = new List<Tuple<string, string, string>>();
             Log.SetupProgress(bundles.Count);
             AssetsManager manager = new AssetsManager();
             BundleFileInstance bundle = manager.LoadBundleFile(originalPath, false);
@@ -150,20 +154,32 @@ namespace ResourceModLoader.Utils
             }
 
             AssetsFileInstance[] assets = new AssetsFileInstance[bundle.file.GetAllFileNames().Count];
-            HashSet<long>[] patched = new HashSet<long>[assets.Length];
+            Dictionary<long, string>[] patched = new Dictionary<long, string>[assets.Length];
             for (int i = 0; i < assets.Length; i++)
             {
-                patched[i] = new HashSet<long>();
+                patched[i] = new Dictionary<long, string>();
                 assets[i] = manager.LoadAssetsFileFromBundle(bundle, i);
             }
 
             bundles.Reverse();
+            List<List<Tuple<int, long, byte[]>>> patches = new List<List<Tuple<int, long, byte[]>>>();
             foreach (string file in bundles)
             {
                 Log.StepProgress("", 1);
-                PatchBundle(manager, assets, file, patched, save + ".temp1");
+                PatchBundle(manager, assets, file, patched, save + ".temp1",conflictResults);
             }
             Log.FinalizeProgress();
+
+            if (post != null)
+                post(manager, assets, patched,patches);
+
+            foreach(var pl in patches)
+            {
+                foreach(var (ai,fi,p) in pl)
+                {
+                    assets[ai].file.GetAssetInfo(fi).Replacer = new ContentReplacerFromBuffer(p);
+                }
+            }
 
             MemoryStream[] streams = new MemoryStream[assets.Count()];
             for (int i = 0; i < assets.Count(); i++)
@@ -173,22 +189,37 @@ namespace ResourceModLoader.Utils
                     AssetsFileWriter w = new AssetsFileWriter(streams[i]);
                     assets[i].file.Write(w);
                 }
+
             for (int i = 0; i < assets.Count(); i++)
                 if (streams[i] != null)
                     bundle.file.BlockAndDirInfo.DirectoryInfos[i].Replacer = new ContentReplacerFromStream(streams[i]);
+
+            using (FileStream fsw = File.OpenWrite(save + ".uncompressed"))
+            {
+                AssetsFileWriter tmpWriter = new AssetsFileWriter(fsw);
+                bundle.file.Write(tmpWriter);
+            }
+            bundle.file.Close();
+            using FileStream fsr = File.OpenRead(save + ".uncompressed");
+            AssetsFileReader bundleRead = new AssetsFileReader(fsr);
+            bundle.file.Read(bundleRead);
             using FileStream fs = File.OpenWrite(save);
             AssetsFileWriter bundleWriter = new AssetsFileWriter(fs);
             Log.SetupProgress(0);
             bundle.file.Pack(bundleWriter, AssetBundleCompressionType.LZ4, false, new SimpleLogProgress());
             Log.FinalizeProgress();
+            fsr.Close();
+            File.Delete(save + ".uncompressed");            
             if (localTmp != "")
             {
                 bundle.file.Close();
                 File.Delete(localTmp);
             }
+            return conflictResults;
         }
-        private static void PatchBundle(AssetsManager manager, AssetsFileInstance[] assets, string toLoad, HashSet<long>[] patched, string cacheFile)
+        private static List<Tuple<int,long, byte[]>> PatchBundle(AssetsManager manager, AssetsFileInstance[] assets, string toLoad, Dictionary<long,string>[] patched, string cacheFile,List<Tuple<string, string,string>> conflictResults)
         {
+            List<Tuple<int,long, byte[]>> result = new List<Tuple<int,long, byte[]>>();
             AssetsManager incomingManager = new AssetsManager();
             BundleFileInstance incomingBundle = incomingManager.LoadBundleFile(toLoad, false);
 
@@ -222,8 +253,6 @@ namespace ResourceModLoader.Utils
                     var originalContainers = GetContainerDic(manager, asset);
                     foreach (var file in asset.file.AssetInfos)
                     {
-                        if (patched[ai].Contains(file.PathId))
-                            continue;
                         var oField = manager.GetBaseField(asset, file);
                         var oName = oField["m_Name"];
                         if (oName.IsDummy) continue;
@@ -252,9 +281,15 @@ namespace ResourceModLoader.Utils
 
                             if (!buf1.Equals(buf2))
                             {
-                                file.Replacer = new ContentReplacerFromBuffer(buf2);
-                                patched[ai].Add(file.PathId);
-                                Log.Debug($"Patched {iName.AsString} -> {toLoad}");
+
+                                if (patched[ai].ContainsKey(file.PathId))
+                                {
+                                    conflictResults.Add(new Tuple<string, string, string>(iName.AsString, toLoad, patched[ai][file.PathId]));
+                                    continue;
+                                }
+                                patched[ai][file.PathId] = toLoad;
+                                result.Add(new Tuple<int, long, byte[]>(ai, file.PathId, buf2));
+                                Log.StepProgress($"Patched {iName.AsString} -> {toLoad}",0);
                             }
                         }
                     }
@@ -265,6 +300,7 @@ namespace ResourceModLoader.Utils
                 incomingBundle.file.Close();
                 File.Delete(localTmp);
             }
+            return result;
         }
         public static Dictionary<long, string> GetContainerDic(AssetsManager manager, AssetsFileInstance assets)
         {

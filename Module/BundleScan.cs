@@ -100,6 +100,10 @@ namespace ResourceModLoader.Module
             Log.FinalizeProgress("索引完成");
             hasBuiltFileContainer = true;
         }
+        public List<string> GetAllBundleName()
+        {
+            return bundlePathLocal.Keys.ToList();
+        }
         public Tuple<string, List<Tuple<string, string>>> CalculateToReplaceItems(string bundlePath)
         {
             AssetsManager manager = new AssetsManager();
@@ -154,7 +158,6 @@ namespace ResourceModLoader.Module
             if (hasUnAddressable || results.Count == 0)
             {
                 results.Clear();
-                results.Add(new Tuple<string, string>(bundleName, ""));
             }
             manager.UnloadAllBundleFiles();
 
@@ -190,7 +193,7 @@ namespace ResourceModLoader.Module
             AssetsFile assetFile = asset.file;
             AssetsFile targetAssetFile = targetAsset.file;
             var container = AB.GetContainerDic(manager, asset);
-
+            var containerTarget = AB.GetContainerDic(targetManager, targetAsset);
             foreach (var assetInfo in assetFile.AssetInfos)
             {
                 if (assetInfo.GetTypeId(assetFile) == (int)AssetClassID.AssetBundle)
@@ -205,6 +208,8 @@ namespace ResourceModLoader.Module
 
                 foreach (var targetAssetInfo in targetAssetFile.AssetInfos)
                 {
+                    if (containerTarget.GetValueOrDefault(targetAssetInfo.PathId, "") != container.GetValueOrDefault(assetInfo.PathId, ""))
+                        continue;
                     var bf1 = manager.GetBaseField(targetAsset, targetAssetInfo);
                     var nameObj1 = bf1["m_Name"];
                     if (nameObj1.IsDummy)

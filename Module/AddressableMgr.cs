@@ -9,14 +9,14 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace ResourceModLoader
+namespace ResourceModLoader.Module
 {
     class AddressableMgr
     {
         List<ContentCatalogData> contentCatalogDatas = new List<ContentCatalogData>();
         List<string> contentCatalogPath = new List<string>();
         List<bool> createBackup = new List<bool>();
-        List<Dictionary<String, ResourceLocation>> generatedAbDictList = new List<Dictionary<string, ResourceLocation>>();
+        List<Dictionary<string, ResourceLocation>> generatedAbDictList = new List<Dictionary<string, ResourceLocation>>();
 
         public int Loaded()
         {
@@ -30,14 +30,15 @@ namespace ResourceModLoader
             }
             string refer = path + ".modded_ref";
             string bak = path + ".modded_bak";
-            string genHash= path + ".modded_hash";
+            string genHash = path + ".modded_hash";
             string toload = path;
             bool needBackup = true;
             if (Path.Exists(refer) && Path.Exists(genHash))
             {
                 string hash = Convert.ToHexString(MD5.HashData(File.ReadAllBytes(path)));
                 string hashBefore = File.ReadAllText(genHash);
-                if(hash == hashBefore) {
+                if (hash == hashBefore)
+                {
                     toload = refer;
                     needBackup = false;
                 }
@@ -55,27 +56,27 @@ namespace ResourceModLoader
                 contentCatalogDatas.Add(AddressablesCatalogFileParser.FromJsonString(File.ReadAllText(toload)));
             }
             contentCatalogPath.Add(path);
-            generatedAbDictList.Add(new Dictionary<String, ResourceLocation>());
+            generatedAbDictList.Add(new Dictionary<string, ResourceLocation>());
             createBackup.Add(needBackup);
         }
-        public bool IsAddressableName(String name)
+        public bool IsAddressableName(string name)
         {
             foreach (ContentCatalogData data in contentCatalogDatas)
             {
-                if(data.Resources.ContainsKey(name))
+                if (data.Resources.ContainsKey(name))
                     return true;
             }
             return false;
         }
-        public List<ResourceLocation> GetFirstAvailableResourceLocationList(String name)
+        public List<ResourceLocation> GetFirstAvailableResourceLocationList(string name)
         {
-            foreach(ContentCatalogData data in contentCatalogDatas)
+            foreach (ContentCatalogData data in contentCatalogDatas)
             {
                 if (!data.Resources.ContainsKey(name))
                     continue;
 
                 var rl = data.Resources[name];
-                if(rl != null && rl.Count > 0)
+                if (rl != null && rl.Count > 0)
                     return rl;
             }
             return new List<ResourceLocation>();
@@ -95,9 +96,9 @@ namespace ResourceModLoader
                 return;
             }
             bool patched = false;
-            for(int i = 0; i < contentCatalogDatas.Count; i++)
+            for (int i = 0; i < contentCatalogDatas.Count; i++)
             {
-                if(ApplyBundleModPreCCD(i, name, bundleFile, containerRedir, depReq))
+                if (ApplyBundleModPreCCD(i, name, bundleFile, containerRedir, depReq))
                     patched = true;
             }
             if (patched) return;
@@ -106,7 +107,7 @@ namespace ResourceModLoader
             {
                 if (!ccd.Resources.ContainsKey(name))
                     continue;
-                foreach(var location in ccd.Resources[name])
+                foreach (var location in ccd.Resources[name])
                 {
                     ResourceLocation? firstDep = null;
                     if (location.Dependencies != null)
@@ -137,13 +138,13 @@ namespace ResourceModLoader
         }
         private bool IsOnlyMatchedResourceLocation(string name)
         {
-            foreach(ContentCatalogData ccd in contentCatalogDatas)
+            foreach (ContentCatalogData ccd in contentCatalogDatas)
             {
                 if (!ccd.Resources.ContainsKey(name))
                 {
                     continue;
                 }
-                if(ccd.Resources[name].Count > 1)
+                if (ccd.Resources[name].Count > 1)
                     return false;
             }
             return true;
@@ -161,7 +162,7 @@ namespace ResourceModLoader
             {
                 if (location.ProviderId == "UnityEngine.ResourceManagement.ResourceProviders.AssetBundleProvider")
                 {
-                    location.InternalId =  bundleFile;
+                    location.InternalId = bundleFile;
                     Log.SuccessPartial($"Bundle {name} --> {location.InternalId}");
                     patched = true;
                     continue;
@@ -191,7 +192,7 @@ namespace ResourceModLoader
                 {
                     continue;
                 }
-                var rl = getAbIdFor(idx,bundleFile, firstDep);
+                var rl = getAbIdFor(idx, bundleFile, firstDep);
 
                 if (rl == null)
                 {
@@ -220,7 +221,7 @@ namespace ResourceModLoader
             }
             return patched;
         }
-        private ResourceLocation? getAbIdFor(int idx,string path, ResourceLocation reference)
+        private ResourceLocation? getAbIdFor(int idx, string path, ResourceLocation reference)
         {
             Dictionary<string, ResourceLocation> generatedAbDict = generatedAbDictList[idx];
             ContentCatalogData ccd = contentCatalogDatas[idx];
@@ -261,9 +262,9 @@ namespace ResourceModLoader
                 string refer = path + ".modded_ref";
                 string genHash = path + ".modded_hash";
 
-                if(needUpdateRef)
+                if (needUpdateRef)
                 {
-                    if(File.Exists(refer))
+                    if (File.Exists(refer))
                         File.Delete(refer);
                     File.Copy(path, refer);
                 }
@@ -273,10 +274,10 @@ namespace ResourceModLoader
                 else
                     File.WriteAllText(path, AddressablesCatalogFileParser.ToJsonString(ccd));
 
-                if(File.Exists(genHash))
+                if (File.Exists(genHash))
                     File.Delete(genHash);
 
-                string hash =Convert.ToHexString(MD5.HashData(File.ReadAllBytes(path)));
+                string hash = Convert.ToHexString(MD5.HashData(File.ReadAllBytes(path)));
                 File.WriteAllText(genHash, hash);
 
                 Console.WriteLine($"已保存 {path}@{hash}");
