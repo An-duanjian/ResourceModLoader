@@ -130,12 +130,13 @@ namespace ResourceModLoader.Utils
             }
         }
 
-        public static List<Tuple<string, string, string>> MergeBundles(string originalPath, List<string> bundles, string save, Action<AssetsManager,BundleFileInstance, AssetsFileInstance[], Dictionary<long, string>[], List<List<Tuple<int, long, byte[]>>>>? post = null)
+        public static Tuple<bool, List<Tuple<string, string, string>>> MergeBundles(string originalPath, List<string> bundles, string save, Action<AssetsManager, BundleFileInstance, AssetsFileInstance[], Dictionary<long, string>[], List<List<Tuple<int, long, byte[]>>>>? post = null)
         {
             List<Tuple<string, string, string>> conflictResults = new List<Tuple<string, string, string>>();
             Log.SetupProgress(bundles.Count);
             AssetsManager manager = new AssetsManager();
             BundleFileInstance bundle = manager.LoadBundleFile(originalPath, false);
+            bool result = true;
 
             string localTmp = "";
             if (bundle.file.BlockAndDirInfo.DirectoryInfos.Find(t => t.DecompressedSize > 20 * 1024 * 1024) != null)
@@ -166,10 +167,20 @@ namespace ResourceModLoader.Utils
             foreach (string file in bundles)
             {
                 Log.StepProgress("", 1);
-                patches.Add(PatchBundle(manager, assets, file, patched, save + ".temp1",conflictResults));
+                var r = PatchBundle(manager,bundle, assets, file, patched, save + ".temp1", conflictResults);
+                if (r == null)
+                {
+                    result = false;
+                    conflictResults.Clear();
+                    conflictResults.Add(new Tuple<string, string, string>(file, "", ""));
+                    break;
+                }
+                patches.Add(r);
             }
             Log.FinalizeProgress();
-
+            if (!result) {
+                return new Tuple<bool, List<Tuple<string, string, string>>>(result, conflictResults);
+            }
             if (post != null)
                 post(manager,bundle, assets, patched,patches);
 
@@ -215,9 +226,9 @@ namespace ResourceModLoader.Utils
                 bundle.file.Close();
                 File.Delete(localTmp);
             }
-            return conflictResults;
+            return new Tuple<bool,List<Tuple<string,string,string>>>(result, conflictResults);
         }
-        private static List<Tuple<int,long, byte[]>> PatchBundle(AssetsManager manager, AssetsFileInstance[] assets, string toLoad, Dictionary<long,string>[] patched, string cacheFile,List<Tuple<string, string,string>> conflictResults)
+        private static List<Tuple<int,long, byte[]>>? PatchBundle(AssetsManager manager,BundleFileInstance bundleFileInst, AssetsFileInstance[] assets, string toLoad, Dictionary<long,string>[] patched, string cacheFile,List<Tuple<string, string,string>> conflictResults)
         {
             List<Tuple<int,long, byte[]>> result = new List<Tuple<int,long, byte[]>>();
             AssetsManager incomingManager = new AssetsManager();
@@ -237,6 +248,24 @@ namespace ResourceModLoader.Utils
             else
             {
                 incomingBundle = incomingManager.LoadBundleFile(toLoad);
+            }
+            var ian = incomingBundle.file.GetAllFileNames();
+            var oan = bundleFileInst.file.GetAllFileNames();
+            for (int i = 0; i < ian.Count; i++)
+            {
+                for(int j = 0; j < oan.Count; j++)
+                {
+                    if (ian[i] != oan[j]) continue;
+                    if (incomingBundle.file.IsAssetsFile(i) != bundleFileInst.file.IsAssetsFile(i)) return null;
+                    if (incomingBundle.file.IsAssetsFile(i)) continue;
+                    incomingBundle.file.GetFileRange(i, out long iStart, out long iLength);
+                    bundleFileInst.file.GetFileRange(j, out long oStart, out long oLength);
+                    if (iLength != oLength) return null;
+                    incomingBundle.file.DataReader.Position = iStart;
+                    byte[] iBytes = incomingBundle.file.DataReader.ReadBytes((int)iLength);
+                    byte[] oBytes = bundleFileInst.file.DataReader.ReadBytes((int)oLength);
+                    if(iBytes != oBytes) return null;
+                }
             }
             for (int i = 0; i < incomingBundle.file.BlockAndDirInfo.DirectoryInfos.Count; i++)
             {

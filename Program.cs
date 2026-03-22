@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Reflection;
 using System.Reflection.Metadata;
+using System.Xml.Linq;
 using AddressablesTools;
 using AddressablesTools.Binary;
 using AddressablesTools.Catalog;
@@ -43,7 +44,6 @@ namespace ResourceModLoader
         static void StartGame()
         {
             if (executable == "") return;
-
         }
         static void ProcessMods()
         {
@@ -245,11 +245,28 @@ namespace ResourceModLoader
             {
                 var toPatch = modContext.CollectToPatch(bundleName);
                 if (toPatch.Any() || modContext.IsRequiredPatch(bundleName)) {
-                    var conflicts = AB.MergeBundles(scan.GetBundleLocalPath(bundleName), toPatch, Path.Combine(basePath, "_generated", bundleName), (m,b, a, p,r) => modContext.PostPatch(bundleName,m,b,a,p,r));
-                    modContext.Redirect(bundleName, Path.Combine(basePath, "_generated", bundleName),"","",true);
-                    foreach(var (name,i,c) in conflicts)
+                    var (result,conflicts) = AB.MergeBundles(scan.GetBundleLocalPath(bundleName), toPatch, Path.Combine(basePath, "_generated", bundleName), (m,b, a, p,r) => modContext.PostPatch(bundleName,m,b,a,p,r));
+
+                    if (result)
                     {
-                        Report.Warning(i, $"在修补 {name} 时和 {c} 冲突");
+                        modContext.Redirect(bundleName, Path.Combine(basePath, "_generated", bundleName), "", "", true);
+                        foreach (var (name, i, c) in conflicts)
+                        {
+                            Report.Warning(i, $"在修补 {name} 时和 {c} 冲突");
+                        }
+                    }
+                    else
+                    {
+                        foreach(var tp in toPatch)
+                        {
+                            foreach(var (name,_,_) in conflicts)
+                                Report.Warning(tp, $" {bundleName} 的修补中存在 {name} 和当前的包不能兼容，无法完成修补");
+                        }
+                        if(toPatch.Count() == 1)
+                        {
+                            Report.Warning(toPatch[0], $" {bundleName} 被直接替换为当前文件，因为他是唯一符合要求的文件");
+                            modContext.Redirect(bundleName, toPatch[0], "", "", true);
+                        }
                     }
                 }
             }
