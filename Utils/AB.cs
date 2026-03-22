@@ -130,7 +130,7 @@ namespace ResourceModLoader.Utils
             }
         }
 
-        public static List<Tuple<string, string, string>> MergeBundles(string originalPath, List<string> bundles, string save, Action<AssetsManager, AssetsFileInstance[], Dictionary<long, string>[], List<List<Tuple<int, long, byte[]>>>>? post = null)
+        public static List<Tuple<string, string, string>> MergeBundles(string originalPath, List<string> bundles, string save, Action<AssetsManager,BundleFileInstance, AssetsFileInstance[], Dictionary<long, string>[], List<List<Tuple<int, long, byte[]>>>>? post = null)
         {
             List<Tuple<string, string, string>> conflictResults = new List<Tuple<string, string, string>>();
             Log.SetupProgress(bundles.Count);
@@ -171,7 +171,7 @@ namespace ResourceModLoader.Utils
             Log.FinalizeProgress();
 
             if (post != null)
-                post(manager, assets, patched,patches);
+                post(manager,bundle, assets, patched,patches);
 
             foreach(var pl in patches)
             {

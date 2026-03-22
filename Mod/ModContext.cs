@@ -14,6 +14,7 @@ namespace ResourceModLoader.Mod
         private AddressableMgr  addressableMgr;
         private BundleScan scan;
         public List<IModItem> modItems = new List<IModItem>();
+        public 
         Dictionary<string,string> lastRedirect = new Dictionary<string,string>();
         public ModContext(AddressableMgr mgr, BundleScan scan) {
             this.addressableMgr = mgr;
@@ -34,6 +35,10 @@ namespace ResourceModLoader.Mod
         }
         public void Add(IModItem modItem)
         {
+            foreach (var mod in modItems)
+            {
+                if (mod.MergeToThis(modItem)) return;
+            }
             modItems.Add(modItem);
         }
         public List<string> CollectToPatch(string name)
@@ -51,11 +56,27 @@ namespace ResourceModLoader.Mod
             }
             return result;
         }
-        public void PostPatch(AssetsManager m,AssetsFileInstance[] a, Dictionary<long, string>[] patched, List<List<Tuple<int, long, byte[]>>> patches)
+        public void InitMod()
+        {
+            foreach (var mod in modItems)
+            {
+                mod.Init(this, addressableMgr, scan);
+            }
+        }
+        public bool IsRequiredPatch(string name)
+        {
+
+            foreach (IModItem modItem in modItems)
+            {
+                if (modItem.RequirePatch(name)) return true;
+            }
+            return false;
+        }
+        public void PostPatch(string bundleName, AssetsManager m,BundleFileInstance b,AssetsFileInstance[] a, Dictionary<long, string>[] patched, List<List<Tuple<int, long, byte[]>>> patches)
         {
             foreach(var modItem in modItems)
             {
-                modItem.PostPatch(m, a, patched,patches);
+                modItem.PostPatch(bundleName, m, b, a, patched, patches); ;
             }
         }
         public void ApplyAll()

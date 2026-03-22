@@ -8,6 +8,7 @@ using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
+using System.Xml.Linq;
 
 namespace ResourceModLoader.Module
 {
@@ -58,6 +59,33 @@ namespace ResourceModLoader.Module
             contentCatalogPath.Add(path);
             generatedAbDictList.Add(new Dictionary<string, ResourceLocation>());
             createBackup.Add(needBackup);
+        }
+        public List<Tuple<string,string>> GetAllResources()
+        {
+            List<Tuple<string, string>> result = new List<Tuple<string, string>>();
+
+            foreach (ContentCatalogData data in contentCatalogDatas)
+            {
+                foreach(var locations in data.Resources) {
+                    foreach(var location in locations.Value) {
+                        ResourceLocation? firstDep = null;
+                        if (location.Dependencies != null)
+                        {
+                            firstDep = location.Dependencies.First();
+                        }
+                        else if (location.DependencyKey != null)
+                        {
+                            firstDep = data.Resources[location.DependencyKey].First();
+                        }
+
+                        if (firstDep == null)
+                            firstDep = location;
+
+                        result.Add(new Tuple<string, string>(location.PrimaryKey, firstDep.PrimaryKey));
+                    }
+                } 
+            }
+            return result;
         }
         public bool IsAddressableName(string name)
         {

@@ -220,6 +220,10 @@ namespace ResourceModLoader
                     }
                     if(WrappableFileItem.IsValid(file) && addressableMgr.IsAddressableName((Path.GetFileNameWithoutExtension(file) + "@").Split("@")[0]))
                         modContext.Add(new WrappableFileItem(priority, file));
+                    if (CommonPatchItem.IsValid(file))
+                        modContext.Add(new CommonPatchItem(priority, file));
+                    if (FuiPatchItem.IsValid(file))
+                        modContext.Add(new FuiPatchItem(priority, file));
                 }
             }
             var dirs = Directory.GetDirectories(modPath);
@@ -240,8 +244,8 @@ namespace ResourceModLoader
             foreach(var bundleName in scan.GetAllBundleName())
             {
                 var toPatch = modContext.CollectToPatch(bundleName);
-                if (toPatch.Any()) {
-                    var conflicts = AB.MergeBundles(scan.GetBundleLocalPath(bundleName), toPatch, Path.Combine(basePath, "_generated", bundleName), (m, a, p,r) => modContext.PostPatch(m,a,p,r));
+                if (toPatch.Any() || modContext.IsRequiredPatch(bundleName)) {
+                    var conflicts = AB.MergeBundles(scan.GetBundleLocalPath(bundleName), toPatch, Path.Combine(basePath, "_generated", bundleName), (m,b, a, p,r) => modContext.PostPatch(bundleName,m,b,a,p,r));
                     modContext.Redirect(bundleName, Path.Combine(basePath, "_generated", bundleName),"","",true);
                     foreach(var (name,i,c) in conflicts)
                     {
@@ -252,6 +256,7 @@ namespace ResourceModLoader
         }
         static void ApplyAll()
         {
+            modContext.InitMod();
             modContext.Sort();
             MergeAndPatchBundles();
             modContext.ApplyAll();

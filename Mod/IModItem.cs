@@ -1,4 +1,5 @@
 ﻿using AssetsTools.NET.Extra;
+using ResourceModLoader.Module;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -14,8 +15,11 @@ namespace ResourceModLoader.Mod
         {
             this.priority = priority;
         }
+        virtual public bool MergeToThis(IModItem modItem) { return false; }
+        virtual public void Init(ModContext context,AddressableMgr addressableMgr, BundleScan bundleScan) { }
         virtual public void Apply(ModContext context) {  }
-        virtual public void PostPatch(AssetsManager manager, AssetsFileInstance[] assets, Dictionary<long, string>[] patched, List<List<Tuple<int, long, byte[]>>> patches) {  }
+        virtual public void PostPatch(string bundleName, AssetsManager manager, BundleFileInstance bundle, AssetsFileInstance[] assets, Dictionary<long, string>[] patched, List<List<Tuple<int, long, byte[]>>> patches) {  }
         virtual public List<string> GetToPatchBundles(string targetBundleName) { return []; }
+        virtual public bool RequirePatch(string name){return false;}
     }
 }
