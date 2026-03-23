@@ -31,13 +31,24 @@ namespace ResourceModLoader.Mod
                 Report.AddModFile(bundleFile);
                 Report.AddTaintFile(bundleFile, name);
             }
-            addressableMgr.ApplyBundleMod(name, bundleFile, container, originalBundle);
+            if(addressableMgr.IsAddressableName(name))
+            {
+                addressableMgr.ApplyBundleMod(name, bundleFile, container, originalBundle);
+            }
+            else
+            {
+                Report.Error(bundleFile, "目标名字不存在");
+            }
+        }
+        public void NewItem(string name, string bundleFile,string container,string referenceName) {
+            Report.AddModFile(bundleFile);
+            addressableMgr.NewAddressableName(name, bundleFile, container, referenceName);
         }
         public void Add(IModItem modItem)
         {
-            foreach (var mod in modItems)
+            for (int i=0;i<modItems.Count;i++)
             {
-                if (mod.MergeToThis(modItem)) return;
+                if (modItems[i].MergeToThis(modItem)) return;
             }
             modItems.Add(modItem);
         }
@@ -58,9 +69,9 @@ namespace ResourceModLoader.Mod
         }
         public void InitMod()
         {
-            foreach (var mod in modItems)
+            for (int i = 0; i < modItems.Count; i++)
             {
-                mod.Init(this, addressableMgr, scan);
+                modItems[i].Init(this, addressableMgr, scan);
             }
         }
         public bool IsRequiredPatch(string name)

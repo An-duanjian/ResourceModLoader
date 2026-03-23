@@ -60,6 +60,22 @@ namespace ResourceModLoader.Module
             generatedAbDictList.Add(new Dictionary<string, ResourceLocation>());
             createBackup.Add(needBackup);
         }
+        public void Reset()
+        {
+            List<string> toLoad = new List<string>();
+            while(contentCatalogPath.Count > 0) { 
+                string path = contentCatalogPath[0];
+                contentCatalogPath.RemoveAt(0);
+                contentCatalogDatas.RemoveAt(0);
+                generatedAbDictList.RemoveAt(0);
+                createBackup.RemoveAt(0);
+                toLoad.Add(path);
+            }
+            generatedAbDictList.Clear();
+            foreach (string path in toLoad) {
+                Add(path);
+            }
+        }
         public List<Tuple<string,string>> GetAllResources()
         {
             List<Tuple<string, string>> result = new List<Tuple<string, string>>();
@@ -137,6 +153,7 @@ namespace ResourceModLoader.Module
                     continue;
                 foreach (var location in ccd.Resources[name])
                 {
+
                     ResourceLocation? firstDep = null;
                     if (location.Dependencies != null)
                     {
@@ -260,7 +277,7 @@ namespace ResourceModLoader.Module
             var rl = new ResourceLocation();
             rl.ProviderId = reference.ProviderId;
             rl.InternalId = path;
-            rl.PrimaryKey = "patched." + reference.PrimaryKey;
+            rl.PrimaryKey = "patched." + Path.GetFileName(path)+".bundle";
             rl.Type = reference.Type;
             AssetBundleRequestOptions opt = new AssetBundleRequestOptions();
             opt.Hash = "";
@@ -309,6 +326,40 @@ namespace ResourceModLoader.Module
                 File.WriteAllText(genHash, hash);
 
                 Console.WriteLine($"已保存 {path}@{hash}");
+            }
+        }
+
+        public void NewAddressableName(string name, string bundleFile, string container, string refName)
+        {
+            if (IsAddressableName(name)) return;
+            for(int i=0;i< contentCatalogDatas.Count;i++)
+            {
+                var ccd = contentCatalogDatas[i];
+                if (!ccd.Resources.ContainsKey(refName))
+                    continue;
+                var reference = ccd.Resources[refName].First();
+                if (reference == null || reference.ProviderId != "UnityEngine.ResourceManagement.ResourceProviders.BundledAssetProvider") continue;
+                var rl = new ResourceLocation();
+                rl.ProviderId = "UnityEngine.ResourceManagement.ResourceProviders.BundledAssetProvider";
+                rl.InternalId = container;
+                rl.PrimaryKey = name;
+                rl.Type = reference.Type;
+                ResourceLocation? refDep = null;
+                if(reference.Dependencies != null && reference.Dependencies.Any())
+                {
+                    refDep = reference.Dependencies[0];
+                }
+                else if(reference.DependencyKey != null) { }
+                {
+                    refDep = ccd.Resources[reference.DependencyKey].First();
+                }
+                if (refDep != null)
+                {
+                    var dep = getAbIdFor(i, bundleFile, refDep);
+                    rl.DependencyKey = dep.PrimaryKey;
+                    ccd.Resources[rl.PrimaryKey] = new List<ResourceLocation> { rl };
+                    Log.SuccessPartial("New " + rl.PrimaryKey);
+                }
             }
         }
     }

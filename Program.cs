@@ -12,6 +12,7 @@ using AddressablesTools.JSON;
 using ResourceModLoader.Mod;
 using ResourceModLoader.Mod.Item;
 using ResourceModLoader.Module;
+using ResourceModLoader.Tool;
 using ResourceModLoader.Utils;
 
 namespace ResourceModLoader
@@ -20,6 +21,7 @@ namespace ResourceModLoader
     {
         static void Main(string[] args)
         {
+
             Init();
             if (addressableMgr == null)
             {
@@ -32,14 +34,49 @@ namespace ResourceModLoader
                 Log.Wait();
                 return;
             }
-
+            if (args.Length > 0)
+            {
+                if (args[0] == "tool")
+                {
+                    Tool(args);
+                    return;
+                }else if (args[0] == "dev")
+                {
+                    isDevMode = true;
+                }
+                else
+                {
+                    Log.Warn("未识别的参数");
+                    return;
+                }
+            }
             TryCopy();
             scan.Scan();
-            ProcessMods();
-            ApplyAll();
-            addressableMgr.Save();
-            Report.Print(Path.Combine(basePath, "mods"));
-            Log.Wait();
+            do
+            {
+                ProcessMods();
+                ApplyAll();
+                addressableMgr.Save();
+                Report.Print(Path.Combine(basePath, "mods"));
+                if (isDevMode)
+                {
+                    addressableMgr.Reset();
+                    Report.Reset();
+                    modContext = new ModContext(addressableMgr, scan);
+                    Log.Info("继续运行将重新应用mod");
+                }
+                Log.Wait();
+            } while (isDevMode);
+        }
+        static void Tool(string[] args)
+        {
+            string toolName = args[1];
+            string[] remain = new string[Math.Max(args.Length - 2,0)];
+            Array.Copy(args, 2,remain,0,remain.Length);
+            if(toolName == "proto-export")
+            {
+                ProtoExportTool.Invoke(remain, addressableMgr, scan);
+            }
         }
         static void StartGame()
         {
@@ -58,6 +95,7 @@ namespace ResourceModLoader
         static BundleScan scan;
         static AddressableMgr addressableMgr;
         static ModContext modContext;
+        static bool isDevMode = false;
         static string DiscoverGameDir(string user)
         {
             string currentPath = Directory.GetCurrentDirectory();
@@ -199,6 +237,11 @@ namespace ResourceModLoader
                 Log.StepProgress("Mod扫描 : " + Path.Combine(modPath, "replace.txt"));
                 modContext.Add(new ReplaceTxtItem(priority, Path.Combine(modPath, "replace.txt")));
             }
+            else if (File.Exists(Path.Combine(modPath, "mod.json")))
+            {
+                Log.StepProgress("Mod扫描 : " + Path.Combine(modPath, "mod.json"));
+                modContext.Add(new ModJsonItem(priority, Path.Combine(modPath, "mod.json")));
+            }
             else
             {
                 var filesAll = Directory.GetFiles(modPath);
@@ -210,7 +253,7 @@ namespace ResourceModLoader
                     if ((Path.GetExtension(file).ToLower() == ".bundle" || Path.GetFileName(file) == "__data"))
                     {
                         var list = scan.CalculateToReplaceItems(file);
-                        modContext.Add(new BundleItem(priority,file,list.Item1,list.Item2));
+                        modContext.Add(new BundleItem(priority, file, list.Item1, list.Item2));
                     }
                     if (Path.GetExtension(file).ToLower() == ".zip")
                     {
@@ -218,7 +261,7 @@ namespace ResourceModLoader
                         if (tp != "")
                             ApplyMod(tp, priority);
                     }
-                    if(WrappableFileItem.IsValid(file) && addressableMgr.IsAddressableName((Path.GetFileNameWithoutExtension(file) + "@").Split("@")[0]))
+                    if (WrappableFileItem.IsValid(file, addressableMgr))
                         modContext.Add(new WrappableFileItem(priority, file));
                     if (CommonPatchItem.IsValid(file))
                         modContext.Add(new CommonPatchItem(priority, file));

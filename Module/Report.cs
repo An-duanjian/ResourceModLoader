@@ -1,4 +1,5 @@
-﻿namespace ResourceModLoader.Module
+﻿
+namespace ResourceModLoader.Module
 {
     enum FileStatus
     {
@@ -124,6 +125,15 @@
                     }
                 }
             }
+        }
+
+        internal static void Reset()
+        {
+            files.Clear();
+            warnings.Clear();
+            statuses.Clear();
+            effectTo.Clear();
+            taintBy.Clear();
         }
     }
 }

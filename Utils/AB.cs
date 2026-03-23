@@ -21,7 +21,57 @@ namespace ResourceModLoader.Utils
     class AB
     {
         private static int PID = 172001;
-        public static string createImageAbSingle(string path,string? fileName)
+        public static string CreateTextAbSingle(string path, string? fileName)
+        {
+            int pid = ++PID;
+            string dirName = Path.GetDirectoryName(path);
+            if (fileName == null)
+                fileName = Path.GetFileNameWithoutExtension(path);
+            string bundleName = fileName + ".bundle";
+            if (!Path.Exists(Path.Combine(dirName, "_generated")))
+                Directory.CreateDirectory(Path.Combine(dirName, "_generated"));
+            string pathAb = Path.Combine(dirName, "_generated", bundleName);
+            AssetsManager manager = new AssetsManager();
+            BundleFileInstance bundleInst = manager.LoadBundleFile(new MemoryStream(Resource1.ref2), "ref2.bundle");
+            AssetsFileInstance assetsInst = manager.LoadAssetsFileFromBundle(bundleInst, 0);
+            AssetsFile assetsFile = assetsInst.file;
+
+            foreach (var type in Enum.GetValues(typeof(AssetClassID)))
+                if ((AssetClassID)type != AssetClassID.AssetBundle)
+                    assetsFile.GetAssetsOfType((int)type).ForEach(asset => { asset.SetRemoved(); });
+            var abFileInfo = assetsFile.GetAssetsOfType(AssetClassID.AssetBundle).First();
+            var abFileField = manager.GetBaseField(assetsInst, abFileInfo);
+            abFileField["m_Name"].AsString = bundleName;
+            abFileField["m_AssetBundleName"].AsString = bundleName;
+            abFileField["m_Container.Array"].Children[0]["second"]["asset"]["m_PathID"].AsLong = pid;
+            abFileField["m_PreloadTable.Array"].Children[0]["m_PathID"].AsLong = pid;
+
+            abFileInfo.SetNewData(abFileField);
+            var baseField = manager.CreateValueBaseField(assetsInst, (int)AssetClassID.TextAsset);
+
+
+            baseField["m_Name"].AsString = fileName;
+            baseField["m_Script"].AsByteArray= File.ReadAllBytes(path);
+
+            var newInfo = AssetFileInfo.Create(assetsFile, pid, (int)AssetClassID.TextAsset);
+            newInfo.SetNewData(baseField);
+
+            assetsFile.Metadata.AddAssetInfo(newInfo);
+
+            bundleInst.file.BlockAndDirInfo.DirectoryInfos[0].Name = "CAB-" + bundleName;
+            bundleInst.file.BlockAndDirInfo.DirectoryInfos[0].SetNewData(assetsFile);
+            while (bundleInst.file.BlockAndDirInfo.DirectoryInfos.Count > 1)
+                bundleInst.file.BlockAndDirInfo.DirectoryInfos.RemoveAt(1);
+
+            if (Path.Exists(pathAb))
+                File.Delete(pathAb);
+            using FileStream fs = File.OpenWrite(pathAb);
+            AssetsFileWriter bundleWriter = new AssetsFileWriter(fs);
+            bundleInst.file.Write(bundleWriter);
+            return pathAb;
+        }
+
+        public static string CreateImageAbSingle(string path,string? fileName)
         {
             int pid = ++PID;
             string dirName = Path.GetDirectoryName(path);
