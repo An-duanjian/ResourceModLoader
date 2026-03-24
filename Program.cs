@@ -107,7 +107,15 @@ namespace ResourceModLoader
                     var detectPath = Path.Combine(possibleName.Trim().Replace("{User}", user), "Player.log");
                     if (File.Exists(detectPath))
                     {
-                        var unityLog = File.ReadAllText(detectPath);
+                        var unityLog = "";
+                        try
+                        {
+                            unityLog = File.ReadAllText(detectPath);
+                        }catch (Exception ex)
+                        {
+                            Log.Warn("无法打开" + possibleName + "的日志文件。如果对应的游戏正在运行，请关闭后重试");
+                            continue;
+                        }
                         var sp = unityLog.IndexOf(DETECT_STR);
                         if (sp >= 0)
                         {
@@ -283,11 +291,29 @@ namespace ResourceModLoader
             Log.Debug($"Game Version {version}");
 
             addressableMgr = new AddressableMgr();
-            addressableMgr.Add(Path.Combine(presistDir, "catalog_" + version + ".json"));
-            addressableMgr.Add(Path.Combine(currentPath, appName + "_Data", "StreamingAssets", "aa", "catalog.bundle"));
+            try
+            {
+                addressableMgr.Add(Path.Combine(presistDir, "catalog_" + version + ".json"));
+            }catch (Exception)
+            {
+                Log.Error("Addressable 初始化Catalog失败，请检查" + Path.Combine(presistDir, "catalog_" + version + ".json")+" 是否损坏");
+                addressableMgr = null;
+                return;
+            }
+
+            try
+            {
+                addressableMgr.Add(Path.Combine(currentPath, appName + "_Data", "StreamingAssets", "aa", "catalog.bundle"));
+            }
+            catch (Exception)
+            {
+                Log.Error("Addressable 初始化Catalog失败，请检查" + Path.Combine(currentPath, appName + "_Data", "StreamingAssets", "aa", "catalog.bundle") + " 是否损坏");
+                addressableMgr = null;
+                return;
+            }
+
             scan = new BundleScan(addressableMgr, Path.Combine(currentPath, appName + "_Data"), Path.Combine(presistDir, "AssetBundles"));
             modContext = new ModContext(addressableMgr, scan);
-
             string modsDirectory = Path.Combine(basePath, "mods");
 
             if (!Directory.Exists(modsDirectory))
