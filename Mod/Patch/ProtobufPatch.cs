@@ -66,7 +66,7 @@ namespace ResourceModLoader.Mod.Patch
                 try
                 {
                     var result = protoObject.Query([p1]);
-                    if (result.Length != 1 || (result.Length != 0 && lastPath != -1))
+                    if (result.Length != 1 || (result.Length == 0 && lastPath != -1))
                     {
                         Report.Warning(source, $"文本修补 {p1} 对应 {result.Length} 个候选，已跳过");
                         continue;
@@ -75,6 +75,8 @@ namespace ResourceModLoader.Mod.Patch
                     byte[] bytes;
                     if (target.StartsWith("##"))
                         bytes = Convert.FromBase64String(target.Substring(2));
+                    else if (target.StartsWith("0x"))
+                        bytes = Convert.FromHexString(target.Substring(2));
                     else
                         bytes = Encoding.UTF8.GetBytes(target);
 

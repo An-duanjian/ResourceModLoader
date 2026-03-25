@@ -40,7 +40,7 @@ namespace ResourceModLoader.Mod.Item
 
         public static bool IsValid(string path,AddressableMgr addressableMgr)
         {
-            string fileName= Path.GetFileName(path);
+            string fileName= Path.GetFileNameWithoutExtension(path);
             if (!fileName.Contains('@') && !addressableMgr.IsAddressableName(fileName))
             {
                 return false;
