@@ -28,8 +28,6 @@ namespace ResourceModLoader.Tool
                 path = args[2].Trim('"').Trim();
             }
 
-            
-            scan.Scan();
             var names = scan.GetAllBundleName();
             Log.SetupProgress(names.Count);
             foreach (var b in names)

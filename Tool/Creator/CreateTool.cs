@@ -18,7 +18,6 @@ namespace ResourceModLoader.Tool.Creator
     {
         public static void Invoke(string modDir,AddressableMgr addressableMgr, BundleScan scan,string appName)
         {
-            scan.Scan();
             var cli = new CLI();
 
             var name = cli.WaitInputText("输入Mod包的文件夹名字","");

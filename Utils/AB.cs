@@ -151,7 +151,6 @@ namespace ResourceModLoader.Utils
         {
             try
             {
-
                 using Bitmap original = new Bitmap(path);
                 // 确保像素格式为 32 位 ARGB（实际 BGRA 顺序）
                 Bitmap bitmap = original.PixelFormat == PixelFormat.Format32bppArgb
@@ -304,6 +303,7 @@ namespace ResourceModLoader.Utils
 
         public static Tuple<bool, List<Tuple<string, string, string>>> MergeBundles(string originalPath, List<string> bundles, string save, Action<AssetsManager, BundleFileInstance, AssetsFileInstance[], Dictionary<long, string>[], List<List<Tuple<int, long, byte[]>>>>? post = null)
         {
+            Log.Debug("开始修补" + originalPath);
             List<Tuple<string, string, string>> conflictResults = new List<Tuple<string, string, string>>();
             Log.SetupProgress(bundles.Count);
             AssetsManager manager = new AssetsManager();
@@ -338,7 +338,7 @@ namespace ResourceModLoader.Utils
             List<List<Tuple<int, long, byte[]>>> patches = new List<List<Tuple<int, long, byte[]>>>();
             foreach (string file in bundles)
             {
-                Log.StepProgress("", 1);
+                Log.StepProgress(file, 1);
                 var r = PatchBundle(manager,bundle, assets, file, patched, save + ".temp1", conflictResults);
                 if (r == null)
                 {
@@ -349,14 +349,16 @@ namespace ResourceModLoader.Utils
                 }
                 patches.Add(r);
             }
-            Log.FinalizeProgress();
             if (!result) {
+                Log.FinalizeProgress();
                 return new Tuple<bool, List<Tuple<string, string, string>>>(result, conflictResults);
             }
             if (post != null)
                 post(manager,bundle, assets, patched,patches);
 
-            foreach(var pl in patches)
+            Log.FinalizeProgress();
+
+            foreach (var pl in patches)
             {
                 foreach(var (ai,fi,p) in pl)
                 {

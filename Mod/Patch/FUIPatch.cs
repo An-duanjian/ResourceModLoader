@@ -40,7 +40,7 @@ namespace ResourceModLoader.Mod.Patch
 
         public void Finalize(AssetsManager manager, AssetsFileInstance assets, AssetFileInfo file)
         {
-            File.WriteAllBytes("1.bytes", package.GetBytes());
+            //File.WriteAllBytes("1.bytes", package.GetBytes());
             field["m_Script"].AsByteArray = package.GetBytes();
             file.SetNewData(field);
         }

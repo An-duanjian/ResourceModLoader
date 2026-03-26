@@ -59,10 +59,14 @@ namespace ResourceModLoader.Mod.Item
                     if(nameField.AsString == this.name)
                     {
                         var patch = GetContext();
+
                         patch.Init(manager, asset, file);
-                        foreach(var src in this.source)
+                        foreach (var src in this.source)
+                        {
+                            Log.StepProgress($"{bundleName}应用修补{Path.GetFileName(src)}", 0);
                             if (patch.PerformPatch(src))
                                 Report.AddTaintFile(src, bundleName);
+                        }
                         patch.Finalize(manager, asset, file);
                         patchContexes.Add(patch);
                     }

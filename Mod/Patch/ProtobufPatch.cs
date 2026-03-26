@@ -108,7 +108,7 @@ namespace ResourceModLoader.Mod.Patch
         public void Finalize(AssetsManager manager, AssetsFileInstance assets, AssetFileInfo file)
         {
             field["m_Script"].AsByteArray = protoObject.GetBytes() ;
-            //File.WriteAllBytes("1.buf", protoObject.GetBytes());
+            //File.WriteAllBytes(field["m_Name"].AsString+".buf", protoObject.GetBytes());
             file.SetNewData(field);
         }
     }

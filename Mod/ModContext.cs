@@ -98,6 +98,7 @@ namespace ResourceModLoader.Mod
         }
         public void PostPatch(string bundleName, AssetsManager m,BundleFileInstance b,AssetsFileInstance[] a, Dictionary<long, string>[] patched, List<List<Tuple<int, long, byte[]>>> patches)
         {
+            Log.StepProgress("其他修补...", 0);
             foreach(var modItem in modItems)
             {
                 modItem.PostPatch(bundleName, m, b, a, patched, patches); ;

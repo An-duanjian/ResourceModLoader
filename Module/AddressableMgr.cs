@@ -60,6 +60,31 @@ namespace ResourceModLoader.Module
             generatedAbDictList.Add(new Dictionary<string, ResourceLocation>());
             createBackup.Add(needBackup);
         }
+        public List<Tuple<string,string>> GetAllBundles()
+        {
+            List<Tuple<string,string>> results = new List<Tuple<string,string>>();
+            HashSet<string> seen = new HashSet<string>();
+            foreach(var ccd in contentCatalogDatas)
+            {
+                foreach(var rll in ccd.Resources)
+                {
+                    foreach(var rl in rll.Value)
+                    {
+                        if (rl.ProviderId != "UnityEngine.ResourceManagement.ResourceProviders.AssetBundleProvider")
+                            continue;
+                        if (seen.Contains(rl.PrimaryKey))
+                            continue;
+                        if(rl.Data is WrappedSerializedObject wo && wo.Object is AssetBundleRequestOptions abro)
+                        {
+                            results.Add(new Tuple<string, string>(rll.Key.ToString(), abro.BundleName));
+                            seen.Add(rl.PrimaryKey);
+                            break;
+                        }
+                    }
+                }
+            }
+            return results;
+        }
         public void Reset()
         {
             List<string> toLoad = new List<string>();

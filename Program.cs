@@ -20,7 +20,7 @@ namespace ResourceModLoader
 {
     class Program
     {
-        static string VERSION = "0.0.9";
+        static string VERSION = "0.1.0";
         static void Main(string[] args)
         {
 
@@ -54,7 +54,6 @@ namespace ResourceModLoader
             }
             InstallAndRecordInfo(args);
             TryCopy();
-            scan.Scan();
             do
             {
                 ProcessMods();
