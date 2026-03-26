@@ -16,6 +16,7 @@ namespace ResourceModLoader.Mod.Item
         string container = "";
         string ext = "";
         List<string> source = new List<string>();
+        List<IPatch> patchContexes = new List<IPatch>();    
         public CommonPatchItem(int priority,string source) : base(priority)
         {
             this.source = new List<string> { source };
@@ -27,6 +28,7 @@ namespace ResourceModLoader.Mod.Item
         {
             if (ext == ".proto") return new ProtobufPatch();
             if (ext == ".bin") return new BinPatch();
+            if (ext == ".fgui") return new FUIPatch();
             return null;
         }
         public override bool MergeToThis(IModItem modItem)
@@ -62,8 +64,16 @@ namespace ResourceModLoader.Mod.Item
                             if (patch.PerformPatch(src))
                                 Report.AddTaintFile(src, bundleName);
                         patch.Finalize(manager, asset, file);
+                        patchContexes.Add(patch);
                     }
                 }
+            }
+        }
+        public override void Apply(ModContext context)
+        {
+            foreach(IPatch patch in patchContexes)
+            {
+                patch.AfterPatch(this, context);
             }
         }
         public static bool IsValid(string source)

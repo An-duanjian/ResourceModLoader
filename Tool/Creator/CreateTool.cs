@@ -10,6 +10,7 @@ using System.Threading.Tasks;
 using static ResourceModLoader.Mod.Item.ModJsonItem;
 using System.Xml.Linq;
 using System.Diagnostics;
+using ResourceModLoader.Mod.Patch;
 
 namespace ResourceModLoader.Tool.Creator
 {
@@ -46,7 +47,7 @@ namespace ResourceModLoader.Tool.Creator
             while(true)
             {
                 UpdateCliInfo(mod, cli, path);
-                var select = cli.WaitSelect("选择一项操作", ["添加图片并添加重定向", "添加文本资产并添加重定向", "提取bundle并添加修补", "提取文本并添加修补","删除项目","写出安装程序","结束"]);
+                var select = cli.WaitSelect("选择一项操作", ["添加图片并添加重定向", "添加文本资产并添加重定向", "提取bundle并添加修补", "提取文本并添加修补", "导入新的FGUI包", "删除项目","写出安装程序","结束"]);
                 if (select == 0)
                     AddWrapableAndRedirect(mod, cli, dataPath, addressableMgr,"image", "VA11HallA_atlas0","png等图像文件");
                 else if (select == 1)
@@ -56,8 +57,10 @@ namespace ResourceModLoader.Tool.Creator
                 else if (select == 3)
                     FindTextAndPatch(cli, mod, scan, dataPath);
                 else if (select == 4)
-                    RemoveItem(cli, mod, dataPath);
+                    ImportFGUIPacket(cli, mod, scan, dataPath);
                 else if (select == 5)
+                    RemoveItem(cli, mod, dataPath);
+                else if (select == 6)
                     WriteInfo(mod, cli, modDir, appName, name);
                 else break;
                 File.WriteAllText(Path.Combine(path, "mod.json"), JsonSerializer.Serialize(mod));
@@ -259,6 +262,81 @@ namespace ResourceModLoader.Tool.Creator
                             var o = ProtoExportTool.Export(dataField.AsByteArray, dir, false, d.Key, c, name);
                             mod.Patch.Add(Path.GetFileName(o));
                             cli.ShowMessage("文件已导出到" + o + ",删除不需要更改的行，修改你需要更改的字符串，适当修改识别错误的字段后保存");
+                            return;
+                        }
+                    }
+                }
+            }
+            cli.ShowMessage("文件未找到");
+            return;
+        }
+
+        public static void ImportFGUIPacket(CLI cli, ModDescription mod, BundleScan scan, string dir)
+        {
+            string path = cli.WaitInputText("请输入文件地址（FGUI导出的二进制文件）");
+            if (path == "") return;
+            List<string> copies = new List<string>();
+            FairyGUIPackage package = null;
+            try
+            {
+                package = new FairyGUIPackage(File.ReadAllBytes(path));
+                foreach (var s in package.items)
+                {
+                    if (s.type == GuiItemType.Atlas)
+                    {
+                        string pp = Path.Combine(Path.GetDirectoryName(path), $"{package.pkgName}_{s.path}");
+                        if (!Path.Exists(pp))
+                        {
+                            cli.ShowMessage($"atlas {Path.GetFileName(pp)} 未找到。检查导出文件名和包名是否一致");
+                            return;
+                        }
+                        copies.Add(pp);
+                    }
+                }
+            }catch(Exception e)
+            {
+                cli.ShowMessage($"无法解析FGUI文件{e.Message}");
+            }
+            if (package == null) return;
+            string name = cli.WaitInputText("输入FUI文件名，一般以_fui结尾(将从全部bundle中搜索，会耗时较久)");
+            if (name == "") return;
+            var l = scan.GetAllBundleContainerName();
+            foreach (var d in l)
+            {
+                foreach (var (c, n) in d.Value)
+                {
+                    if (n == name)
+                    {
+                        var (m, a) = scan.GetBundle(d.Key);
+
+                        foreach (var file in a.file.AssetInfos)
+                        {
+                            var field = m.GetBaseField(a, file);
+                            if (field == null || field["m_Name"].IsDummy)
+                                continue;
+                            if (field["m_Name"].AsString != name) continue;
+
+                            var dataField = field["m_Script"];
+                            if (dataField == null || dataField.IsDummy)
+                            {
+                                cli.ShowMessage("不是合法的TextAsset");
+                                return;
+                            }
+                            string targetFileName = $"{name}@{d.Key}@{c}.patch.fgui";
+                            File.Copy(path, Path.Combine(dir, targetFileName), true);
+                            foreach (var cp in copies)
+                                File.Copy(cp, Path.Combine(dir, Path.GetFileName(cp)), true);
+
+                            var op = new FairyGUIPackage(field["m_Script"].AsByteArray);
+                            StringBuilder sb = new StringBuilder();
+                            foreach(var pa in package.items)
+                            {
+                                if (pa.raw[9] != 0 && pa.name != null)
+                                    sb.Append(pa.name).Append(" => ").Append($"ui://{op.pkgId}{pa.id}").AppendLine();
+                            }
+                            mod.Patch.Add(targetFileName);
+                            cli.SetInfo(sb.ToString());
+                            cli.ShowMessage($"{package.pkgName} 已被合并到 {op.pkgName}。请注意，你需要根据新的URL来使用资源");
                             return;
                         }
                     }

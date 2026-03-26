@@ -22,8 +22,14 @@ namespace ResourceModLoader.Mod
         }
         public void Redirect(string name,string bundleFile,string container,string originalBundle,bool noReport = false)
         {
+            if(bundleFile == "")
+            {
+                Log.Error($"对{name}的重定向目标不存在");
+                return;
+            }
             if (lastRedirect.ContainsKey(name))
             {
+                Report.Warning(bundleFile, $"{name}的修改与{lastRedirect[name]}冲突");
                 return;
             }
             if (!noReport)
@@ -39,8 +45,14 @@ namespace ResourceModLoader.Mod
             {
                 Report.Error(bundleFile, "目标名字不存在");
             }
+            lastRedirect[name] = bundleFile;
         }
         public void NewItem(string name, string bundleFile,string container,string referenceName) {
+            if (bundleFile == "")
+            {
+                Log.Error($"对{name}的添加目标不存在");
+                return;
+            }
             Report.AddModFile(bundleFile);
             addressableMgr.NewAddressableName(name, bundleFile, container, referenceName);
             Report.AddTaintFile(bundleFile, name);
@@ -93,8 +105,8 @@ namespace ResourceModLoader.Mod
         }
         public void ApplyAll()
         {
-            foreach (var modItem in modItems)
-                modItem.Apply(this);
+            for (int i = 0; i < modItems.Count; i++)
+                modItems[i].Apply(this);
         }
         public void Sort()
         {

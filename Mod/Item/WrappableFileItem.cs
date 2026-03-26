@@ -15,8 +15,10 @@ namespace ResourceModLoader.Mod.Item
         string path;
         string refName="";
         string container = "";
-        public WrappableFileItem(int priority,string path) : base(priority)
+        string source;
+        public WrappableFileItem(int priority,string path,string targetName = "",string refName="") : base(priority)
         {
+            this.source = path;
             this.name = Path.GetFileNameWithoutExtension(path) ;
             if (this.name.Contains("@"))
             {
@@ -35,6 +37,10 @@ namespace ResourceModLoader.Mod.Item
                 this.path = AB.CreateTextAbSingle(path, this.name);
                 this.container = "2";
             }
+            if (targetName != "")
+                this.name = targetName;
+            if(refName != "")
+                this.refName = refName;
             else throw new ArgumentException();
         }
 
@@ -55,6 +61,10 @@ namespace ResourceModLoader.Mod.Item
 
 
         override public void Apply(ModContext context) {
+            if(path == "" || path == null)
+            {
+                Report.Error(source, "无法自动包装资产AB");
+            }
             if (refName == "")
                 context.Redirect(name, path, this.container, "");
             else
