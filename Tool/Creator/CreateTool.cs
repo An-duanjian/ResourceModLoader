@@ -122,7 +122,7 @@ namespace ResourceModLoader.Tool.Creator
             File.WriteAllText(Path.Combine(modDir, modName, "possible_names.txt"), "{User}\\AppData\\LocalLow\\" + infos[0] + "\\" + infos[1]);
             if (mod.BaseDir != null)
             {
-                File.WriteAllText(Path.Combine(modDir, modName, "copies.txt"), mod.BaseDir+":"+modName+"/"+mod.BaseDir + "\nmods.json:" + modName + "/mods.json");
+                File.WriteAllText(Path.Combine(modDir, modName, "copies.txt"), mod.BaseDir+":"+modName+"/"+mod.BaseDir + "\nmod.json:" + modName + "/mod.json");
             }
             else
             {
@@ -131,7 +131,7 @@ namespace ResourceModLoader.Tool.Creator
                 foreach (var a in mod.Add) copies.AppendLine(a.File + ":" + modName + "/" +a.File);
                 foreach (var a in mod.Redirect) copies.AppendLine(a.File + ":" + modName + "/" + a.File);
                 foreach (var a in mod.Bundle)copies.AppendLine(a.File + ":" + modName + "/" + a.File);
-                File.WriteAllText(Path.Combine(modDir, modName, "copies.txt"),copies.ToString()+"\nmods.json:" + modName + "/mods.json");
+                File.WriteAllText(Path.Combine(modDir, modName, "copies.txt"),copies.ToString()+"\nmod.json:" + modName + "/mod.json");
             }
             string self = Process.GetCurrentProcess().MainModule.FileName;
             File.Copy(self,Path.Combine(modDir,modName,Path.GetFileName(self)));
