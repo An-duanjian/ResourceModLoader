@@ -21,7 +21,7 @@ namespace ResourceModLoader
 {
     class Program
     {
-        static string VERSION = "0.1.3";
+        static string VERSION = "0.1.4";
         static void Main(string[] args)
         {
 
@@ -181,7 +181,7 @@ namespace ResourceModLoader
         {
             string self = Process.GetCurrentProcess().MainModule.FileName;
             string dep = Path.Combine(Path.GetDirectoryName(self), "PVRTexLib.dll");
-            if (!Path.Exists(dep))
+            if (!Path.Exists(dep) || Path.GetDirectoryName(Path.GetDirectoryName(self)) != basePath)
                 return;
             File.Copy(dep, Path.Combine(basePath, Path.GetFileName(dep)), true);
             Log.SuccessAll("已将PVRTexLib.dll拷贝到 " + dep);
