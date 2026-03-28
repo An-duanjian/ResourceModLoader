@@ -140,7 +140,10 @@ namespace ResourceModLoader.Tool.Creator
                 File.WriteAllText(Path.Combine(modDir, modName, "copies.txt"),copies.ToString()+"\nmod.json:" + modName + "/mod.json");
             }
             string self = Process.GetCurrentProcess().MainModule.FileName;
-            File.Copy(self,Path.Combine(modDir,modName,Path.GetFileName(self)));
+            File.Copy(self,Path.Combine(modDir,modName,Path.GetFileName(self)),true);
+            string dep = Path.Combine(Path.GetDirectoryName(self), "PVRTexLib.dll");
+            if (Path.Exists(dep))
+                File.Copy(dep, Path.Combine(modDir, Path.GetFileName(dep)), true);
             cli.ShowMessage("完成");
         }
         public static void AddWrapableAndRedirect(ModJsonItem.ModDescription mod, CLI cli, string dir, AddressableMgr addressable,string wrapableType,string wrapableReference,string typeTip)
