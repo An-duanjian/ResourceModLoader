@@ -50,6 +50,7 @@ mods目录会被递归读取，你可以创建任意多的文件夹。
 ### replace.txt
 将资产打包成AB后，放在mods/<any path>/xxxx.bundle
 创建replace.txt，内容如下
+
 ```
 #每行表示一个重定向
 原始文件名:bundle文件名:目标bundle文件名
@@ -59,6 +60,12 @@ mods目录会被递归读取，你可以创建任意多的文件夹。
 
 ### 图片
 对于图片类型的Addressable，可以直接将图片命名成文件名.png/.jpg，程序会自动将其打包为AB并设置重定向
+
+### 精灵动画
+
+需要先安装 [](URL "https://mirrors.tuna.tsinghua.edu.cn/python/3.12.10/python-3.12.10.exe")，其余库会在运行时自动安装。
+
+` ResourceModLoader.exe tool sprite-anim import/export ` 命令后会在mod旁新建import/export文件夹，import内放入含sprite动画的资源包后，使用`export`命令即可在export内解包，在export内修改后 使用`import`命令即可生成新_patcher.ab包 
 
 ### zip
 自动解压后识别上述类型

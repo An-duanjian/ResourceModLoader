@@ -1,9 +1,51 @@
-import sys, os, argparse, glob, math, struct, re, json, tempfile, shutil
+import argparse
+import glob
+import importlib.util
+import json
+import math
+import os
+import re
+import shutil
+import struct
+import subprocess
+import sys
+import tempfile
 from collections import defaultdict
 from typing import Any, Dict, List, Set, Tuple
+import random, traceback
+
+REQUIRED_PYTHON = (3, 12)
+REQUIRED_PACKAGES = {
+    "clr": "pythonnet",
+    "UnityPy": "UnityPy",
+    "PIL": "Pillow",
+}
+
+
+def _has_module(module_name: str) -> bool:
+    return importlib.util.find_spec(module_name) is not None
+
+
+def ensure_python312_dependencies():
+    if sys.version_info[:2] != REQUIRED_PYTHON:
+        print(
+            f"[sprite_ab_io_mesh] Recommended Python version is {REQUIRED_PYTHON[0]}.{REQUIRED_PYTHON[1]}; "
+            f"current version is {sys.version_info.major}.{sys.version_info.minor}."
+        )
+        return
+
+    missing_packages = [package_name for module_name, package_name in REQUIRED_PACKAGES.items() if not _has_module(module_name)]
+    if not missing_packages:
+        return
+
+    print(f"[sprite_ab_io_mesh] Installing missing packages: {', '.join(missing_packages)}")
+    subprocess.check_call([sys.executable, "-m", "pip", "install", *missing_packages])
+
+
+ensure_python312_dependencies()
+
 import UnityPy
 from PIL import Image
-import random, traceback
 
 def ensure_dir(p): os.makedirs(p, exist_ok=True)
 def sanitize_name(s: str) -> str: return (s or "").replace("\\", "_").replace("/", "_").strip()
@@ -28,6 +70,27 @@ def to_float(v, default=0.0):
 def to_int(v, default=0):
     try: return int(v)
     except: return int(default)
+
+
+def floats_close(a, b, tol=1e-6):
+    return abs(to_float(a, 0.0) - to_float(b, 0.0)) <= tol
+
+
+def env_flag(name: str) -> bool:
+    value = (os.environ.get(name) or "").strip().lower()
+    return value in ("1", "true", "yes", "on")
+
+
+def use_loop_last_to_first(meta: dict) -> bool:
+    if not bool(meta.get("loop", True)):
+        return False
+    if env_flag("RML_DISABLE_LOOP_LAST_TO_FIRST"):
+        return False
+    if env_flag("RML_LOOP_LAST_TO_FIRST"):
+        return True
+    if env_flag("RML_APPEND_LOOP_CLOSING_FRAME"):
+        return False
+    return True
 
 def get_loop_flag(clip) -> bool:
     settings = getattr(clip, "m_AnimationClipSettings", None)
@@ -109,9 +172,10 @@ def get_pivot01(spr, rect_w: int, rect_h: int):
     if pivot is None or rect_w <= 0 or rect_h <= 0:
         return [0.5, 0.5]
     try:
-        px = to_float(getattr(pivot, "x", 0.5 * rect_w), 0.5 * rect_w)
-        py = to_float(getattr(pivot, "y", 0.5 * rect_h), 0.5 * rect_h)
-        return [px / rect_w, py / rect_h]
+        return [
+            to_float(getattr(pivot, "x", 0.5), 0.5),
+            to_float(getattr(pivot, "y", 0.5), 0.5),
+        ]
     except Exception:
         return [0.5, 0.5]
 
@@ -314,6 +378,43 @@ def sync_clip_meta_with_pngs(clip_dir: str, meta: dict) -> Tuple[dict, bool]:
     changed = json.dumps(updated_meta, ensure_ascii=False, sort_keys=True) != json.dumps(meta, ensure_ascii=False, sort_keys=True)
     return updated_meta, changed
 
+
+def maybe_append_loop_closing_frame(meta: dict, resolved_frames: List[dict], original_count: int) -> List[dict]:
+    if not env_flag("RML_APPEND_LOOP_CLOSING_FRAME"):
+        return resolved_frames
+    if not bool(meta.get("loop", True)) or len(resolved_frames) <= 1:
+        return resolved_frames
+
+    result = list(resolved_frames)
+    first_frame = dict(resolved_frames[0])
+    last_time = to_float(resolved_frames[-1].get("time"), float(len(resolved_frames) - 1))
+    frame_duration = derive_frame_duration(meta, meta.get("frames") or [], meta.get("keyframes") or [])
+    if frame_duration <= 0:
+        sample_rate = to_float(meta.get("sampleRate"), 30.0)
+        frame_duration = (1.0 / sample_rate) if sample_rate > 0 else (1.0 / 30.0)
+    first_frame["time"] = last_time + frame_duration
+    first_frame["index"] = len(result)
+    first_frame["is_loop_closing_frame"] = True
+    if first_frame.get("frame_meta") is None and original_count > 0:
+        first_frame["frame_meta"] = {}
+    result.append(first_frame)
+    return result
+
+
+def maybe_rewrite_last_frame_to_first(meta: dict, resolved_frames: List[dict]) -> List[dict]:
+    if not use_loop_last_to_first(meta) or len(resolved_frames) <= 1:
+        return resolved_frames
+
+    result = list(resolved_frames)
+    first_frame = dict(result[0])
+    last_frame = dict(result[-1])
+    first_frame["index"] = last_frame.get("index", len(result) - 1)
+    first_frame["time"] = last_frame.get("time", first_frame.get("time", 0.0))
+    first_frame["frame_meta"] = first_frame.get("frame_meta") or last_frame.get("frame_meta") or {}
+    first_frame["is_loop_last_to_first"] = True
+    result[-1] = first_frame
+    return result
+
 def gather_clip_data(env) -> Dict[str, dict]:
     sprites_by_pid = {}
     for obj in env.objects:
@@ -487,15 +588,29 @@ def ensure_assets_tools():
         raise RuntimeError(f"未找到 classdata.tpk: {classdb_path}")
 
     clr.AddReference(dll_path)
-    from AssetsTools.NET import AssetFileInfo, AssetTypeArrayInfo, AssetsFileWriter  # type: ignore[import-not-found]
+    from System import Array, Byte  # type: ignore[import-not-found]
+    from AssetsTools.NET import (  # type: ignore[import-not-found]
+        AssetBundleCompressionType,
+        AssetFileInfo,
+        AssetTypeArrayInfo,
+        AssetsFileReader,
+        AssetsFileWriter,
+        ContentReplacerFromBuffer,
+    )
     from AssetsTools.NET.Extra import AssetClassID, AssetsManager  # type: ignore[import-not-found]
 
     _ASSETS_TOOLS = {
+        "Array": Array,
+        "Byte": Byte,
         "manager": AssetsManager(),
+        "AssetsManager": AssetsManager,
+        "AssetBundleCompressionType": AssetBundleCompressionType,
         "AssetClassID": AssetClassID,
         "AssetFileInfo": AssetFileInfo,
         "AssetTypeArrayInfo": AssetTypeArrayInfo,
+        "AssetsFileReader": AssetsFileReader,
         "AssetsFileWriter": AssetsFileWriter,
+        "ContentReplacerFromBuffer": ContentReplacerFromBuffer,
         "classdb": classdb_path,
     }
     return _ASSETS_TOOLS
@@ -600,6 +715,22 @@ def collect_track_bindings(env):
     return anim_id_to_playable_asset_id, playable_asset_id_to_track_clip, tracks
 
 
+def collect_used_sprite_render_key_ids(env, exclude_path_ids: Set[int] = None) -> Set[int]:
+    exclude_path_ids = exclude_path_ids or set()
+    used_ids: Set[int] = set()
+    for obj in env.objects:
+        if obj.type.name != "Sprite" or obj.path_id in exclude_path_ids:
+            continue
+        try:
+            sprite_data = obj.parse_as_dict()
+        except Exception:
+            continue
+        render_key = sprite_data.get("m_RenderDataKey")
+        if isinstance(render_key, list) and len(render_key) >= 2:
+            used_ids.add(to_int(render_key[1], 0))
+    return used_ids
+
+
 def update_sprites(bundle_path: str, update_list: List[dict], temp_file: str):
     assets = ensure_assets_tools()
     manager = assets["manager"]
@@ -624,12 +755,21 @@ def update_sprites(bundle_path: str, update_list: List[dict], temp_file: str):
 
         last_sprite_info = bundle_file.GetAssetInfo(last_sprite_id)
         last_sprite_field = manager.GetBaseField(bundle_file_inst, last_sprite_info)
+        used_render_key_ids: Set[int] = set()
+        for sprite_info in bundle_file.GetAssetsOfType(AssetClassID.Sprite):
+            sprite_field = manager.GetBaseField(bundle_file_inst, sprite_info)
+            try:
+                used_render_key_ids.add(int(sprite_field.Get("m_RenderDataKey.second").AsLong))
+            except Exception:
+                continue
 
         for i in range(needly):
             path_id = None
             while not path_id or bundle_file.GetAssetInfo(path_id) is not None:
                 path_id = rand.randint(-INT_64, INT_64)
             last_sprite_field.Get("m_Name").AsString = name_format.format(i + id_offset)
+            render_key_id = generate_random_meta_path_id(used_render_key_ids)
+            last_sprite_field.Get("m_RenderDataKey.second").AsLong = int(render_key_id)
             new_info = AssetFileInfo.Create(bundle_file, path_id, int(AssetClassID.Sprite))
             new_info.SetNewData(last_sprite_field)
             bundle_file.Metadata.AddAssetInfo(new_info)
@@ -784,16 +924,49 @@ def build_pointer_array(existing: List[dict], path_ids: List[int]) -> List[dict]
 
 def ensure_streamed_clip_data(anim_data: dict, keyframes: List[dict], sample_rate: float):
     target_count = len(keyframes)
+    existing = anim_data.get("m_MuscleClip", {}).get("m_Clip", {}).get("data", {}).get("m_StreamedClip", {}).get("data", []) or []
+    header0 = to_int(existing[0], 4286578687) if len(existing) >= 1 else 4286578687
+    header1 = to_int(existing[1], 1) if len(existing) >= 2 else 1
     data = [0] * (target_count * 7 + 2)
-    for index in range(max(0, target_count - 1)):
-        next_time = to_float(keyframes[index + 1].get("time"), (index + 1) / sample_rate if sample_rate > 0 else index + 1)
-        data[2 + index * 7 + 4] = float_to_u32(index)
-        data[2 + index * 7 + 5] = float_to_u32(next_time)
-        data[2 + index * 7 + 6] = 1
     if len(data) >= 2:
-        data[-2] = float_to_u32(math.inf)
-        data[-1] = 0
+        data[0] = header0
+        data[1] = header1
+    for index in range(max(0, target_count)):
+        base = 2 + index * 7
+        data[base + 4] = float_to_u32(index)
+        if index < target_count - 1:
+            next_time = to_float(keyframes[index + 1].get("time"), (index + 1) / sample_rate if sample_rate > 0 else index + 1)
+            data[base + 5] = float_to_u32(next_time)
+            data[base + 6] = 1
+        else:
+            data[base + 5] = float_to_u32(math.inf)
+            data[base + 6] = 0
     anim_data["m_MuscleClip"]["m_Clip"]["data"]["m_StreamedClip"]["data"] = data
+
+
+def align_up(value: int, alignment: int) -> int:
+    if alignment <= 0:
+        return value
+    remainder = value % alignment
+    return value if remainder == 0 else value + (alignment - remainder)
+
+
+def get_sprite_uv_offset(vertex_count: int) -> int:
+    return align_up(max(0, vertex_count) * 3 * 4, 16)
+
+
+def pack_sprite_vertex_streams(positions: List[Tuple[float, float, float]], uvs: List[Tuple[float, float]]) -> bytes:
+    raw = bytearray()
+    for x, y, z in positions:
+        raw.extend(struct.pack("<fff", float(x), float(y), float(z)))
+
+    uv_offset = get_sprite_uv_offset(len(positions))
+    if len(raw) < uv_offset:
+        raw.extend(b"\x00" * (uv_offset - len(raw)))
+
+    for u, v in uvs:
+        raw.extend(struct.pack("<ff", float(u), float(v)))
+    return bytes(raw)
 
 
 def normalize_rect(rect) -> Tuple[int, int, int, int]:
@@ -829,7 +1002,7 @@ def remap_sprite_uvs(sprite_data: dict, old_texture_size: Tuple[int, int], new_t
     if vertex_count <= 0:
         return
 
-    pos_bytes = vertex_count * 3 * 4
+    pos_bytes = get_sprite_uv_offset(vertex_count)
     uv_bytes = vertex_count * 2 * 4
     if len(raw) < pos_bytes + uv_bytes:
         return
@@ -928,6 +1101,401 @@ def choose_grid_layout(frame_sizes: List[Tuple[int, int]], padding: int, min_wid
     _, atlas_width, grid_h, placements = best
     return atlas_width, grid_h, placements
 
+
+def remove_duplicate_points(points: List[Tuple[float, float]], tol: float = 1e-4) -> List[Tuple[float, float]]:
+    result: List[Tuple[float, float]] = []
+    for x, y in points:
+        if result and abs(result[-1][0] - x) <= tol and abs(result[-1][1] - y) <= tol:
+            continue
+        result.append((float(x), float(y)))
+    if len(result) > 1 and abs(result[0][0] - result[-1][0]) <= tol and abs(result[0][1] - result[-1][1]) <= tol:
+        result.pop()
+    return result
+
+
+def rdp_simplify(points: List[Tuple[float, float]], epsilon: float) -> List[Tuple[float, float]]:
+    if len(points) <= 2:
+        return list(points)
+
+    x1, y1 = points[0]
+    x2, y2 = points[-1]
+    dx = x2 - x1
+    dy = y2 - y1
+    denom = dx * dx + dy * dy
+
+    max_dist = -1.0
+    split_index = -1
+    for index in range(1, len(points) - 1):
+        px, py = points[index]
+        if denom <= 1e-8:
+            dist = math.hypot(px - x1, py - y1)
+        else:
+            t = ((px - x1) * dx + (py - y1) * dy) / denom
+            proj_x = x1 + t * dx
+            proj_y = y1 + t * dy
+            dist = math.hypot(px - proj_x, py - proj_y)
+        if dist > max_dist:
+            max_dist = dist
+            split_index = index
+
+    if max_dist <= epsilon or split_index <= 0:
+        return [points[0], points[-1]]
+
+    left = rdp_simplify(points[:split_index + 1], epsilon)
+    right = rdp_simplify(points[split_index:], epsilon)
+    return left[:-1] + right
+
+
+def polygon_signed_area(points: List[Tuple[float, float]]) -> float:
+    area = 0.0
+    count = len(points)
+    for index in range(count):
+        x1, y1 = points[index]
+        x2, y2 = points[(index + 1) % count]
+        area += x1 * y2 - x2 * y1
+    return area * 0.5
+
+
+def cross2(a: Tuple[float, float], b: Tuple[float, float], c: Tuple[float, float]) -> float:
+    return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+
+
+def point_in_triangle(point: Tuple[float, float], a: Tuple[float, float], b: Tuple[float, float], c: Tuple[float, float]) -> bool:
+    c1 = cross2(point, a, b)
+    c2 = cross2(point, b, c)
+    c3 = cross2(point, c, a)
+    has_neg = (c1 < -1e-6) or (c2 < -1e-6) or (c3 < -1e-6)
+    has_pos = (c1 > 1e-6) or (c2 > 1e-6) or (c3 > 1e-6)
+    return not (has_neg and has_pos)
+
+
+def triangulate_polygon(points: List[Tuple[float, float]]) -> List[int]:
+    count = len(points)
+    if count < 3:
+        return []
+
+    order = list(range(count))
+    if polygon_signed_area(points) < 0:
+        order.reverse()
+
+    triangles: List[int] = []
+    guard = 0
+    while len(order) > 3 and guard < count * count:
+        ear_found = False
+        for idx in range(len(order)):
+            prev_index = order[(idx - 1) % len(order)]
+            curr_index = order[idx]
+            next_index = order[(idx + 1) % len(order)]
+            a = points[prev_index]
+            b = points[curr_index]
+            c = points[next_index]
+            if cross2(a, b, c) <= 1e-6:
+                continue
+            blocked = False
+            for other in order:
+                if other in (prev_index, curr_index, next_index):
+                    continue
+                if point_in_triangle(points[other], a, b, c):
+                    blocked = True
+                    break
+            if blocked:
+                continue
+            triangles.extend([prev_index, curr_index, next_index])
+            del order[idx]
+            ear_found = True
+            break
+        if not ear_found:
+            break
+        guard += 1
+
+    if len(order) == 3:
+        triangles.extend(order)
+    return triangles
+
+
+def alpha_row_bounds(image: Image.Image, alpha_threshold: int = 1) -> List[Tuple[float, float, float]]:
+    alpha = image.getchannel("A")
+    width, height = image.size
+    rows: List[Tuple[float, float, float]] = []
+    for y_top in range(height):
+        left = None
+        right = None
+        for x in range(width):
+            if alpha.getpixel((x, y_top)) >= alpha_threshold:
+                left = x
+                break
+        if left is None:
+            continue
+        for x in range(width - 1, -1, -1):
+            if alpha.getpixel((x, y_top)) >= alpha_threshold:
+                right = x
+                break
+        if right is None:
+            continue
+        y_center = height - (y_top + 0.5)
+        rows.append((float(y_center), float(left) + 0.5, float(right) + 0.5))
+    return rows
+
+
+def build_tight_mesh_polygon(image: Image.Image) -> List[Tuple[float, float]]:
+    rows = alpha_row_bounds(image)
+    width, height = image.size
+    if not rows:
+        return [(0.0, 0.0), (float(width), 0.0), (float(width), float(height)), (0.0, float(height))]
+
+    right_chain = [(right, y_center) for y_center, _, right in rows]
+    left_chain = [(left, y_center) for y_center, left, _ in rows]
+
+    polygon: List[Tuple[float, float]] = []
+    for epsilon in (1.0, 2.0, 3.0, 4.0, 6.0, 8.0):
+        simplified_right = remove_duplicate_points(rdp_simplify(right_chain, epsilon))
+        simplified_left = remove_duplicate_points(rdp_simplify(left_chain, epsilon))
+        candidate = remove_duplicate_points(simplified_right + list(reversed(simplified_left)))
+        if len(candidate) < 4:
+            continue
+        polygon = candidate
+        if len(candidate) <= 11:
+            break
+
+    if len(polygon) < 4:
+        left = min(bound_left for _, bound_left, _ in rows)
+        right = max(bound_right for _, _, bound_right in rows) + 1.0
+        top = rows[0][0] + 0.5
+        bottom = rows[-1][0] - 0.5
+        polygon = [(left, top), (right, top), (right, bottom), (left, bottom)]
+
+    return polygon
+
+
+def infer_mod_atlas_cell_size(texture_plan: dict, target_frames: List[dict]) -> Tuple[int, int]:
+    widths = []
+    heights = []
+    for entry in target_frames:
+        try:
+            sprite_data = entry["sprite_obj"].parse_as_dict()
+        except Exception:
+            continue
+        rect = sprite_data.get("m_Rect") or {}
+        widths.append(max(1, round_int(rect.get("width", 0))))
+        heights.append(max(1, round_int(rect.get("height", 0))))
+
+    fallback_sizes = []
+    for entry in target_frames:
+        try:
+            with Image.open(entry["image_path"]) as replacement_image:
+                fallback_sizes.append(replacement_image.size)
+        except Exception:
+            continue
+
+    if fallback_sizes:
+        max_image_w = max(width for width, _ in fallback_sizes)
+        max_image_h = max(height for _, height in fallback_sizes)
+        fallback_w = int(math.ceil(max_image_w / 32.0) * 32)
+        fallback_h = int(math.ceil(max_image_h / 16.0) * 16)
+    else:
+        fallback_w = 224
+        fallback_h = 304
+
+    if widths and heights:
+        existing_w = max(widths)
+        existing_h = max(heights)
+        if existing_w <= fallback_w * 1.5 and existing_h <= fallback_h * 1.5:
+            return existing_w, existing_h
+
+    return fallback_w, fallback_h
+
+
+def infer_mod_atlas_columns(texture_data, cell_w: int, cell_h: int, frame_count: int) -> int:
+    max_texture_size = 2048
+    max_cols = max(1, max_texture_size // max(1, cell_w))
+    max_rows = max(1, max_texture_size // max(1, cell_h))
+    existing_width = max(0, round_int(getattr(texture_data, "m_Width", 0)))
+    if cell_w > 0 and existing_width > 0 and existing_width % cell_w == 0:
+        existing_cols = max(1, existing_width // cell_w)
+        existing_rows = int(math.ceil(frame_count / float(existing_cols))) if existing_cols > 0 else frame_count
+        if existing_cols <= max(1, frame_count) and existing_cols <= max_cols and existing_rows <= max_rows:
+            return existing_cols
+
+    if frame_count <= 0:
+        return 1
+
+    if max_cols <= 1:
+        return 1
+
+    min_required_cols = max(1, int(math.ceil(frame_count / float(max_rows))))
+    preferred = 4 if frame_count >= 4 else frame_count
+    cols = max(min_required_cols, preferred)
+    cols = min(max_cols, max(1, cols))
+    while cols < max_cols and math.ceil(frame_count / float(cols)) * cell_h > max_texture_size:
+        cols += 1
+    return max(1, min(cols, frame_count))
+
+
+def get_existing_cell_rect(sprite_data: dict, cell_w: int, cell_h: int, index: int, cols: int, rows: int, prefer_existing: bool = True) -> Dict[str, float]:
+    if prefer_existing:
+        rect = sprite_data.get("m_Rect") or {}
+        width = max(1, round_int(rect.get("width", cell_w)))
+        height = max(1, round_int(rect.get("height", cell_h)))
+        x = round_int(rect.get("x", 0))
+        y = round_int(rect.get("y", 0))
+        if width > 0 and height > 0:
+            return {"x": float(x), "y": float(y), "width": float(width), "height": float(height)}
+
+    col = index % cols
+    row_from_top = index // cols
+    return {
+        "x": float(col * cell_w),
+        "y": float((rows - 1 - row_from_top) * cell_h),
+        "width": float(cell_w),
+        "height": float(cell_h),
+    }
+
+
+def choose_texture_rect_offset(sprite_data: dict, cell_rect: dict, image_size: Tuple[int, int]) -> Tuple[float, float]:
+    image_w, image_h = image_size
+    rd = sprite_data.get("m_RD") or {}
+    texture_rect = rd.get("textureRect") or {}
+    cell_w = max(1, round_int(cell_rect.get("width", image_w)))
+    cell_h = max(1, round_int(cell_rect.get("height", image_h)))
+    if texture_rect:
+        cell_x = to_float(cell_rect.get("x"), 0.0)
+        cell_y = to_float(cell_rect.get("y"), 0.0)
+        old_w = round_int(texture_rect.get("width", 0))
+        old_h = round_int(texture_rect.get("height", 0))
+        if old_w == image_w and old_h == image_h:
+            offset_x = to_float(texture_rect.get("x"), cell_x) - cell_x
+            offset_y = to_float(texture_rect.get("y"), cell_y) - cell_y
+            if 0.0 <= offset_x <= max(0.0, cell_w - image_w) and 0.0 <= offset_y <= max(0.0, cell_h - image_h):
+                return (offset_x, offset_y)
+
+    offset_x = max(0.0, min(float(cell_w - image_w), math.floor((cell_w - image_w) / 2.0)))
+    offset_y = max(0.0, min(float(cell_h - image_h), cell_h - image_h - 10.0))
+    return float(offset_x), float(offset_y)
+
+
+def rebuild_sprite_as_mod_cell(sprite_data: dict,
+                               atlas_size: Tuple[int, int],
+                               cell_rect: dict,
+                               replacement_image: Image.Image,
+                               pixels_per_unit: float,
+                               pivot01,
+                               border=None,
+                               force_rect_mesh: bool = False):
+    atlas_w, atlas_h = atlas_size
+    cell_x = to_float(cell_rect.get("x"), 0.0)
+    cell_y = to_float(cell_rect.get("y"), 0.0)
+    cell_w = max(1, round_int(cell_rect.get("width", replacement_image.width)))
+    cell_h = max(1, round_int(cell_rect.get("height", replacement_image.height)))
+    pivot = normalize_vec2_list(pivot01, [0.5, 0.0])
+    sprite_border = normalize_vec4_list(border, [0.0, 0.0, 0.0, 0.0])
+
+    offset_x, offset_y = choose_texture_rect_offset(sprite_data, cell_rect, replacement_image.size)
+    texture_rect = {
+        "x": float(cell_x + offset_x),
+        "y": float(cell_y + offset_y),
+        "width": float(replacement_image.width),
+        "height": float(replacement_image.height),
+    }
+
+    if force_rect_mesh:
+        polygon = [
+            (0.0, 0.0),
+            (float(replacement_image.width), 0.0),
+            (float(replacement_image.width), float(replacement_image.height)),
+            (0.0, float(replacement_image.height)),
+        ]
+        triangles = [0, 1, 2, 0, 2, 3]
+    else:
+        polygon = build_tight_mesh_polygon(replacement_image)
+        if len(polygon) < 3:
+            polygon = [
+                (0.0, 0.0),
+                (float(replacement_image.width), 0.0),
+                (float(replacement_image.width), float(replacement_image.height)),
+                (0.0, float(replacement_image.height)),
+            ]
+
+        triangles = triangulate_polygon(polygon)
+        if len(triangles) < 3:
+            polygon = [
+                (0.0, 0.0),
+                (float(replacement_image.width), 0.0),
+                (float(replacement_image.width), float(replacement_image.height)),
+                (0.0, float(replacement_image.height)),
+            ]
+            triangles = [0, 1, 2, 0, 2, 3]
+
+    if len(triangles) < 3:
+        polygon = [
+            (0.0, 0.0),
+            (float(replacement_image.width), 0.0),
+            (float(replacement_image.width), float(replacement_image.height)),
+            (0.0, float(replacement_image.height)),
+        ]
+        triangles = [0, 1, 2, 0, 2, 3]
+
+    ppu = max(1e-6, to_float(pixels_per_unit, 100.0))
+    pivot_px_x = cell_w * to_float(pivot[0], 0.5)
+    pivot_px_y = cell_h * to_float(pivot[1], 0.0)
+    atlas_origin_x = texture_rect["x"]
+    atlas_origin_y = texture_rect["y"]
+
+    positions = []
+    uvs = []
+    for px, py in polygon:
+        atlas_px_x = atlas_origin_x + px
+        atlas_px_y = atlas_origin_y + py
+        positions.append(((atlas_px_x - cell_x - pivot_px_x) / ppu, (atlas_px_y - cell_y - pivot_px_y) / ppu, 0.0))
+        uvs.append((atlas_px_x / float(atlas_w), atlas_px_y / float(atlas_h)))
+
+    raw = pack_sprite_vertex_streams(positions, uvs)
+
+    index_bytes = struct.pack("<" + "H" * len(triangles), *triangles)
+    min_x = min(pos[0] for pos in positions)
+    max_x = max(pos[0] for pos in positions)
+    min_y = min(pos[1] for pos in positions)
+    max_y = max(pos[1] for pos in positions)
+
+    rd = sprite_data["m_RD"]
+    vertex_data = rd["m_VertexData"]
+    vertex_data["m_VertexCount"] = len(positions)
+    vertex_data["m_DataSize"] = raw
+    rd["m_IndexBuffer"] = index_bytes
+    if rd.get("m_SubMeshes"):
+        rd["m_SubMeshes"][0]["firstByte"] = 0
+        rd["m_SubMeshes"][0]["indexCount"] = len(triangles)
+        rd["m_SubMeshes"][0]["topology"] = 0
+        rd["m_SubMeshes"][0]["baseVertex"] = 0
+        rd["m_SubMeshes"][0]["firstVertex"] = 0
+        rd["m_SubMeshes"][0]["vertexCount"] = len(positions)
+        rd["m_SubMeshes"][0]["localAABB"] = {
+            "m_Center": {"x": float((min_x + max_x) * 0.5), "y": float((min_y + max_y) * 0.5), "z": 0.0},
+            "m_Extent": {"x": float((max_x - min_x) * 0.5), "y": float((max_y - min_y) * 0.5), "z": 0.0},
+        }
+
+    rd["textureRect"] = dict(texture_rect)
+    if "textureRectOffset" in rd:
+        rd["textureRectOffset"] = {"x": float(offset_x), "y": float(offset_y)}
+    if "atlasRectOffset" in rd:
+        rd["atlasRectOffset"] = {"x": -1.0, "y": -1.0}
+    sprite_data["m_IsPolygon"] = False
+    sprite_data["m_Pivot"] = {"x": float(pivot[0]), "y": float(pivot[1])}
+    sprite_data["m_Border"] = {
+        "x": float(sprite_border[0]),
+        "y": float(sprite_border[1]),
+        "z": float(sprite_border[2]),
+        "w": float(sprite_border[3]),
+    }
+    sprite_data["m_Rect"] = {
+        "x": float(cell_x),
+        "y": float(cell_y),
+        "width": float(cell_w),
+        "height": float(cell_h),
+    }
+    sprite_data["m_Offset"] = {"x": 0.0, "y": float(-cell_h / 2.0)}
+
+    return texture_rect
+
 def build_rect_sprite_geometry(sprite_data: dict, texture_size: Tuple[int, int], rect, pixels_per_unit: float, pivot01):
     tex_w, tex_h = texture_size
     rect_x, rect_y, rect_w, rect_h = normalize_rect(rect)
@@ -958,16 +1526,12 @@ def build_rect_sprite_geometry(sprite_data: dict, texture_size: Tuple[int, int],
         (u1, v1),
     ]
 
-    raw = bytearray()
-    for x, y, z in positions:
-        raw.extend(struct.pack("<fff", float(x), float(y), float(z)))
-    for u, v in uvs:
-        raw.extend(struct.pack("<ff", float(u), float(v)))
+    raw = pack_sprite_vertex_streams(positions, uvs)
 
     rd = sprite_data["m_RD"]
     vertex_data = rd["m_VertexData"]
     vertex_data["m_VertexCount"] = 4
-    vertex_data["m_DataSize"] = bytes(raw)
+    vertex_data["m_DataSize"] = raw
     rd["m_IndexBuffer"] = struct.pack("<6H", 0, 1, 2, 2, 1, 3)
     if rd.get("m_SubMeshes"):
         rd["m_SubMeshes"][0]["firstByte"] = 0
@@ -999,7 +1563,7 @@ def rebuild_sprite_uvs_from_local(sprite_data: dict, new_texture_size: Tuple[int
     if vertex_count <= 0:
         return
 
-    pos_bytes = vertex_count * 3 * 4
+    pos_bytes = get_sprite_uv_offset(vertex_count)
     uv_bytes = vertex_count * 2 * 4
     if len(raw) < pos_bytes + uv_bytes:
         return
@@ -1323,55 +1887,260 @@ def resolve_stream_output_dir(bundle_path: str, out_path: str = None) -> str:
     ensure_dir(base_dir)
     return os.path.abspath(base_dir)
 
-def save_bundle_env(env, bundle_path: str, out_path: str, textures, done_label: str = "[DONE]"):
-    if has_streamed_texture_data(textures):
-        out_dir = resolve_stream_output_dir(bundle_path, out_path)
-        for name in os.listdir(out_dir):
-            path = os.path.join(out_dir, name)
-            if not os.path.isfile(path):
-                continue
-            lower_name = name.lower()
-            if lower_name.endswith(".bundle") or lower_name.endswith(".ress"):
-                try:
-                    os.remove(path)
-                except OSError:
-                    pass
-        print(f"[SAVE] 检测到外部流资源，使用 env.save 输出到目录：{out_dir}")
-        env.save(out_path=out_dir)
-        desired_bundle_name = os.path.basename(out_path) if out_path else os.path.basename(bundle_path)
-        if desired_bundle_name:
-            bundle_files = [
-                name for name in os.listdir(out_dir)
-                if os.path.isfile(os.path.join(out_dir, name)) and name.lower().endswith(".bundle")
-            ]
-            if bundle_files:
-                bundle_files.sort(key=lambda name: os.path.getmtime(os.path.join(out_dir, name)), reverse=True)
-                src = os.path.join(out_dir, bundle_files[0])
-                dst = os.path.join(out_dir, desired_bundle_name)
-                if os.path.normcase(src) != os.path.normcase(dst) and os.path.isfile(dst):
-                    try:
-                        os.remove(dst)
-                    except OSError:
-                        pass
-                if os.path.normcase(src) != os.path.normcase(dst):
-                    try:
-                        shutil.move(src, dst)
-                    except OSError:
-                        pass
-                for extra_name in bundle_files[1:]:
-                    try:
-                        os.remove(os.path.join(out_dir, extra_name))
-                    except OSError:
-                        pass
-        print(f"{done_label} 已写出 bundle 及其 .resS 到目录：{out_dir}")
-        return
 
+def collect_bundle_file_bytes(env) -> Dict[str, bytes]:
+    bundle_files = {}
+    for name, value in env.file.files.items():
+        if hasattr(value, "save"):
+            try:
+                bundle_files[name] = bytes(value.save())
+                continue
+            except Exception as ex:
+                raise RuntimeError(f"序列化内部文件失败: {name}: {ex}") from ex
+
+        if hasattr(value, "bytes"):
+            try:
+                bundle_files[name] = bytes(value.bytes)
+                continue
+            except Exception as ex:
+                raise RuntimeError(f"读取内部文件失败: {name}: {ex}") from ex
+
+        raise RuntimeError(f"不支持导出 bundle 内部文件: {name} ({type(value)!r})")
+
+    return bundle_files
+
+
+def write_unitypy_bundle_temp(env, temp_path: str):
+    with open(temp_path, "wb") as f:
+        f.write(env.file.save(packer="original"))
+
+
+def get_container_dic_assets(manager, assets_inst) -> Dict[int, str]:
+    assets = ensure_assets_tools()
+    AssetClassID = assets["AssetClassID"]
+
+    result = {}
+    for asset in assets_inst.file.GetAssetsOfType(AssetClassID.AssetBundle):
+        field = manager.GetBaseField(assets_inst, asset)
+        for container_desc in field["m_Container.Array"].Children:
+            container_name = container_desc["first"].AsString
+            path_id = int(container_desc["second"]["asset"]["m_PathID"].AsLong)
+            result[path_id] = container_name
+    return result
+
+
+def read_bundle_entry_bytes(bundle_file, index: int) -> bytes:
+    long_start, long_length = bundle_file.GetFileRange(index)
+    bundle_file.DataReader.Position = long_start
+    return bytes(bundle_file.DataReader.ReadBytes(int(long_length)))
+
+
+def read_asset_object_bytes(asset_file, asset_info) -> bytes:
+    start = asset_info.GetAbsoluteByteOffset(asset_file)
+    size = asset_info.ByteSize
+    asset_file.Reader.Position = int(start)
+    return bytes(asset_file.Reader.ReadBytes(int(size)))
+
+
+def build_object_patches_from_bundle(original_manager, original_bundle, original_assets, incoming_bundle_path: str):
+    assets = ensure_assets_tools()
+    incoming_manager = assets["AssetsManager"]()
+    incoming_bundle = incoming_manager.LoadBundleFile(os.path.abspath(incoming_bundle_path), False)
+
+    incoming_names = incoming_bundle.file.GetAllFileNames()
+    original_names = original_bundle.file.GetAllFileNames()
+
+    for incoming_index in range(incoming_names.Count):
+        incoming_name = incoming_names[incoming_index]
+        for original_index in range(original_names.Count):
+            if incoming_name != original_names[original_index]:
+                continue
+            if incoming_bundle.file.IsAssetsFile(incoming_index) != original_bundle.file.IsAssetsFile(original_index):
+                raise RuntimeError(f"bundle 内部文件类型不一致: {incoming_name}")
+            if incoming_bundle.file.IsAssetsFile(incoming_index):
+                continue
+
+            incoming_bytes = read_bundle_entry_bytes(incoming_bundle.file, incoming_index)
+            original_bytes = read_bundle_entry_bytes(original_bundle.file, original_index)
+            if len(incoming_bytes) != len(original_bytes) or incoming_bytes != original_bytes:
+                raise RuntimeError(f"非 assets 内部文件发生变化，无法安全增量回写: {incoming_name}")
+
+    patches = []
+    for incoming_index in range(incoming_bundle.file.BlockAndDirInfo.DirectoryInfos.Count):
+        incoming_asset = incoming_manager.LoadAssetsFileFromBundle(incoming_bundle, incoming_index)
+        if incoming_asset is None:
+            continue
+
+        incoming_assets_file = incoming_asset.file
+        incoming_containers = get_container_dic_assets(incoming_manager, incoming_asset)
+        incoming_lookup = {}
+        for incoming_file in incoming_assets_file.AssetInfos:
+            container_name = incoming_containers.get(int(incoming_file.PathId))
+            if container_name is None:
+                continue
+            incoming_field = incoming_manager.GetBaseField(incoming_asset, incoming_file)
+            incoming_name_field = incoming_field["m_Name"]
+            if incoming_name_field.IsDummy:
+                continue
+            incoming_lookup[(container_name, incoming_name_field.AsString)] = incoming_file
+
+        for asset_index, original_asset in enumerate(original_assets):
+            if original_asset is None:
+                continue
+            original_containers = get_container_dic_assets(original_manager, original_asset)
+            for original_file in original_asset.file.AssetInfos:
+                container_name = original_containers.get(int(original_file.PathId))
+                if container_name is None:
+                    continue
+                original_field = original_manager.GetBaseField(original_asset, original_file)
+                original_name_field = original_field["m_Name"]
+                if original_name_field.IsDummy:
+                    continue
+
+                incoming_file = incoming_lookup.get((container_name, original_name_field.AsString))
+                if incoming_file is None:
+                    continue
+
+                original_bytes = read_asset_object_bytes(original_asset.file, original_file)
+                incoming_bytes = read_asset_object_bytes(incoming_assets_file, incoming_file)
+                if original_bytes != incoming_bytes:
+                    patches.append((asset_index, int(original_file.PathId), incoming_bytes))
+
+    incoming_bundle.file.Close()
+    incoming_manager.UnloadAll()
+    return patches
+
+
+def patch_bundle_objects_with_assetstools(bundle_path: str, incoming_bundle_path: str, out_path: str, done_label: str = "[DONE]"):
+    assets = ensure_assets_tools()
+    manager = assets["manager"]
+    AssetsFileReader = assets["AssetsFileReader"]
+    AssetsFileWriter = assets["AssetsFileWriter"]
+    ContentReplacerFromBuffer = assets["ContentReplacerFromBuffer"]
+    AssetBundleCompressionType = assets["AssetBundleCompressionType"]
+    Array = assets["Array"]
+    Byte = assets["Byte"]
+
+    tmp_uncompressed = out_path + ".uncompressed"
+    temp_dir = tempfile.mkdtemp(prefix="rml_asset_patch_")
+    try:
+        for path in (out_path, tmp_uncompressed):
+            if os.path.exists(path):
+                os.remove(path)
+
+        manager.UnloadAll()
+        bundle = manager.LoadBundleFile(os.path.abspath(bundle_path), False)
+        asset_count = bundle.file.GetAllFileNames().Count
+        original_assets = [manager.LoadAssetsFileFromBundle(bundle, i) for i in range(asset_count)]
+        patches = build_object_patches_from_bundle(manager, bundle, original_assets, incoming_bundle_path)
+
+        if not patches:
+            shutil.copyfile(bundle_path, out_path)
+            print(f"{done_label} 未检测到对象级差异，已复制原始 AB：{out_path}")
+            return
+
+        for asset_index, path_id, payload in patches:
+            original_assets[asset_index].file.GetAssetInfo(path_id).Replacer = ContentReplacerFromBuffer(Array[Byte](payload))
+
+        for asset_index, asset in enumerate(original_assets):
+            if asset is None:
+                continue
+            asset_temp_path = os.path.join(temp_dir, f"asset_{asset_index}.assets")
+            asset_writer = AssetsFileWriter(asset_temp_path)
+            asset.file.Write(asset_writer)
+            asset_writer.Close()
+            with open(asset_temp_path, "rb") as f:
+                asset_bytes = f.read()
+            bundle.file.BlockAndDirInfo.DirectoryInfos[asset_index].Replacer = ContentReplacerFromBuffer(Array[Byte](asset_bytes))
+
+        tmp_writer = AssetsFileWriter(os.path.abspath(tmp_uncompressed))
+        bundle.file.Write(tmp_writer)
+        tmp_writer.Close()
+
+        bundle.file.Close()
+        tmp_reader = AssetsFileReader(os.path.abspath(tmp_uncompressed))
+        bundle.file.Read(tmp_reader)
+        bundle_writer = AssetsFileWriter(os.path.abspath(out_path))
+        bundle.file.Pack(bundle_writer, AssetBundleCompressionType.LZ4, False, None)
+        bundle_writer.Close()
+        tmp_reader.Close()
+        manager.UnloadAll()
+
+        if os.path.exists(tmp_uncompressed):
+            os.remove(tmp_uncompressed)
+
+        print(f"{done_label} 写出新 AB：{out_path}")
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+def repack_bundle_with_assetstools(bundle_path: str, out_path: str, bundle_files: Dict[str, bytes], done_label: str = "[DONE]"):
+    assets = ensure_assets_tools()
+    manager = assets["manager"]
+    AssetsFileReader = assets["AssetsFileReader"]
+    AssetsFileWriter = assets["AssetsFileWriter"]
+    ContentReplacerFromBuffer = assets["ContentReplacerFromBuffer"]
+    AssetBundleCompressionType = assets["AssetBundleCompressionType"]
+    Array = assets["Array"]
+    Byte = assets["Byte"]
+
+    tmp_uncompressed = out_path + ".uncompressed"
+    for path in (out_path, tmp_uncompressed):
+        if os.path.exists(path):
+            os.remove(path)
+
+    manager.UnloadAll()
+    bundle = manager.LoadBundleFile(os.path.abspath(bundle_path), False)
+    directory_infos = bundle.file.BlockAndDirInfo.DirectoryInfos
+    name_to_index = {directory_infos[i].Name: i for i in range(directory_infos.Count)}
+
+    for name, data in bundle_files.items():
+        index = name_to_index.get(name)
+        if index is None:
+            raise RuntimeError(f"原始 bundle 中不存在内部文件: {name}")
+        directory_infos[index].Replacer = ContentReplacerFromBuffer(Array[Byte](data))
+
+    tmp_writer = AssetsFileWriter(os.path.abspath(tmp_uncompressed))
+    bundle.file.Write(tmp_writer)
+    tmp_writer.Close()
+
+    bundle.file.Close()
+    tmp_reader = AssetsFileReader(os.path.abspath(tmp_uncompressed))
+    bundle.file.Read(tmp_reader)
+
+    bundle_writer = AssetsFileWriter(os.path.abspath(out_path))
+    bundle.file.Pack(bundle_writer, AssetBundleCompressionType.LZ4, False, None)
+    bundle_writer.Close()
+    tmp_reader.Close()
+    manager.UnloadAll()
+
+    if os.path.exists(tmp_uncompressed):
+        os.remove(tmp_uncompressed)
+
+    print(f"{done_label} 写出新 AB：{out_path}")
+
+def save_bundle_env(env, bundle_path: str, out_path: str, textures, done_label: str = "[DONE]", force_full_repack: bool = False):
     if not out_path:
         root, ext = os.path.splitext(bundle_path)
         out_path = root + "_patched" + (ext or "")
-    with open(out_path, "wb") as f:
-        f.write(env.file.save(packer="original"))
-    print(f"{done_label} 写出新 AB：{out_path}")
+
+    if force_full_repack or has_streamed_texture_data(textures):
+        bundle_files = collect_bundle_file_bytes(env)
+        if force_full_repack:
+            print("[SAVE] 检测到 Sprite 资产结构变更，使用 AssetsTools.NET 整文件重封包")
+        else:
+            print("[SAVE] 检测到外部流资源，使用 AssetsTools.NET 重封包并保留内部文件替换")
+        repack_bundle_with_assetstools(bundle_path, out_path, bundle_files, done_label)
+        return
+
+    fd, incoming_bundle_path = tempfile.mkstemp(prefix="rml_unitypy_incoming_", suffix=".bundle")
+    os.close(fd)
+    try:
+        write_unitypy_bundle_temp(env, incoming_bundle_path)
+        patch_bundle_objects_with_assetstools(bundle_path, incoming_bundle_path, out_path, done_label)
+    finally:
+        if os.path.exists(incoming_bundle_path):
+            os.remove(incoming_bundle_path)
 
 def import_sprites(bundle_path: str, images_root: str, out_path: str = None, mode: str = "rect", match: str = "name"):
     env = UnityPy.load(bundle_path)
@@ -1521,6 +2290,9 @@ def import_clip_folders(bundle_path: str, export_root: str, out_path: str = None
             print(f"[IMPORT-CLIPS] 跳过无有效帧的动画目录: {clip_dir}")
             continue
 
+        resolved_frames = maybe_append_loop_closing_frame(meta, resolved_frames, len(animation.sprites))
+        resolved_frames = maybe_rewrite_last_frame_to_first(meta, resolved_frames)
+
         plans[clip_name] = {
             "clip_dir": clip_dir,
             "meta": meta,
@@ -1563,6 +2335,7 @@ def import_clip_folders(bundle_path: str, export_root: str, out_path: str = None
     try:
         env = UnityPy.load(work_bundle_path)
         animations = load_animations(env)
+        content_modified = bool(sprite_asset_changes)
 
         if sprite_asset_changes:
             for anim_name, is_add, changed_ids in sprite_asset_changes:
@@ -1632,9 +2405,15 @@ def import_clip_folders(bundle_path: str, export_root: str, out_path: str = None
                 continue
 
             path_ids = [sprite.path_id for _, sprite, _ in sprite_slots]
+            if use_loop_last_to_first(plan["meta"]) and len(path_ids) > 1:
+                path_ids[-1] = path_ids[0]
             anim_data = animation.animation_clip_data
             existing_mapping = anim_data.get("m_ClipBindingConstant", {}).get("pptrCurveMapping", [])
-            anim_data["m_ClipBindingConstant"]["pptrCurveMapping"] = build_pointer_array(existing_mapping, path_ids)
+            existing_mapping_ids = [to_int(entry.get("m_PathID"), 0) for entry in existing_mapping]
+            animation_modified = False
+            if existing_mapping_ids != path_ids:
+                anim_data["m_ClipBindingConstant"]["pptrCurveMapping"] = build_pointer_array(existing_mapping, path_ids)
+                animation_modified = True
 
             delta = plan["target_count"] - plan["original_count"]
             if delta != 0:
@@ -1642,6 +2421,7 @@ def import_clip_folders(bundle_path: str, export_root: str, out_path: str = None
                 value_array_delta = anim_data.get("m_MuscleClip", {}).get("m_ValueArrayDelta", [])
                 if value_array_delta:
                     value_array_delta[0]["m_Stop"] = to_float(value_array_delta[0].get("m_Stop"), 0.0) + delta
+                animation_modified = True
 
             sample_rate = to_float(anim_data.get("m_SampleRate"), to_float(plan["meta"].get("sampleRate"), 12.0))
             frame_duration = derive_frame_duration(plan["meta"], plan["meta"].get("frames") or [], plan["meta"].get("keyframes") or [])
@@ -1650,21 +2430,41 @@ def import_clip_folders(bundle_path: str, export_root: str, out_path: str = None
                 clip_length = frame_duration * plan["target_count"]
             elif frame_duration > 0 and plan["target_count"] > 0:
                 clip_length = frame_duration * plan["target_count"]
-            anim_data["m_MuscleClip"]["m_StopTime"] = clip_length
-            anim_data["m_MuscleClip"]["m_Clip"]["data"]["m_DenseClip"]["m_FrameCount"] = plan["target_count"] + 2
-            ensure_streamed_clip_data(anim_data, plan["frames"], sample_rate)
-            animation.animation_clip.save_typetree(anim_data)
+            if use_loop_last_to_first(plan["meta"]) and frame_duration > 0 and plan["target_count"] > 1:
+                clip_length = frame_duration * (plan["target_count"] - 1)
+            if env_flag("RML_TRIM_LOOP_GAP") and bool(plan["meta"].get("loop", True)) and frame_duration > 0 and plan["target_count"] > 1:
+                clip_length = frame_duration * (plan["target_count"] - 1)
+            current_stop_time = anim_data.get("m_MuscleClip", {}).get("m_StopTime")
+            desired_dense_count = plan["target_count"] + 2
+            current_dense_count = anim_data.get("m_MuscleClip", {}).get("m_Clip", {}).get("data", {}).get("m_DenseClip", {}).get("m_FrameCount")
+            if not floats_close(current_stop_time, clip_length):
+                anim_data["m_MuscleClip"]["m_StopTime"] = clip_length
+                animation_modified = True
+            if to_int(current_dense_count, desired_dense_count) != desired_dense_count:
+                anim_data["m_MuscleClip"]["m_Clip"]["data"]["m_DenseClip"]["m_FrameCount"] = desired_dense_count
+                animation_modified = True
+            if animation_modified:
+                ensure_streamed_clip_data(anim_data, plan["frames"], sample_rate)
+                animation.animation_clip.save_typetree(anim_data)
+                content_modified = True
 
             if animation.mono_behaviour is not None:
                 mono_data = animation.mono_behaviour.parse_as_dict()
-                mono_data["sprites"] = build_pointer_array(mono_data.get("sprites", []), path_ids)
-                animation.mono_behaviour.save_typetree(mono_data)
+                current_mono_ids = [to_int(entry.get("m_PathID"), 0) for entry in (mono_data.get("sprites", []) or [])]
+                if current_mono_ids != path_ids:
+                    mono_data["sprites"] = build_pointer_array(mono_data.get("sprites", []), path_ids)
+                    animation.mono_behaviour.save_typetree(mono_data)
+                    animation_modified = True
+                    content_modified = True
 
             playable_asset_id = anim_id_to_playable_asset_id.get(animation.animation_clip.path_id)
             if playable_asset_id is not None:
                 track_clip = playable_asset_id_to_track_clip.get(playable_asset_id)
                 if track_clip is not None:
-                    track_clip["m_Duration"] = clip_length
+                    if not floats_close(track_clip.get("m_Duration"), clip_length):
+                        track_clip["m_Duration"] = clip_length
+                        animation_modified = True
+                        content_modified = True
 
             if animation.texture is None:
                 print(f"[IMPORT-CLIPS] 动画缺少贴图引用: {clip_name}")
@@ -1689,109 +2489,99 @@ def import_clip_folders(bundle_path: str, export_root: str, out_path: str = None
                     "image_path": frame["image_path"],
                     "rect": slot_rect,
                     "is_added": index >= plan["original_count"],
+                    "preserve_geometry": plan["target_count"] == plan["original_count"],
                     "pivot01": (frame.get("frame_meta") or {}).get("pivot01"),
                     "border": (frame.get("frame_meta") or {}).get("border"),
                 })
 
-            updated_animations += 1
-            print(f"[IMPORT-CLIPS] 已重建动画绑定: {clip_name}，目标帧数 {plan['target_count']}")
+            if animation_modified:
+                updated_animations += 1
+                print(f"[IMPORT-CLIPS] 已重建动画绑定: {clip_name}，目标帧数 {plan['target_count']}")
+            else:
+                print(f"[IMPORT-CLIPS] 动画绑定无需改动: {clip_name}")
 
         for obj, mono_data in tracks:
             obj.save_typetree(mono_data)
 
         changed_textures = 0
+        force_rect_mesh = env_flag("RML_FORCE_RECT_MESH")
         for texture_pid, texture_plan in texture_plans.items():
             if not texture_plan["frames"]:
                 continue
 
             texture_data = texture_plan["texture_obj"].read()
-            base_image = texture_data.image.convert("RGBA")
-            old_w, old_h = base_image.size
             target_frames = texture_plan["frames"]
-            target_sprite_ids = {entry["sprite_obj"].path_id for entry in target_frames}
-
-            padding = 2
-            packed_frames = []
-            frame_sizes = []
-            for entry in target_frames:
-                repl = Image.open(entry["image_path"]).convert("RGBA")
-                frame_w, frame_h = repl.size
-                frame_sizes.append((frame_w, frame_h))
-                packed_frames.append((entry, repl, frame_w, frame_h))
-
-            preserve_existing = len(target_sprite_ids) != len(texture_plan["all_sprites"])
-            atlas_width, grid_h, placements = choose_grid_layout(
-                frame_sizes,
-                padding,
-                min_width=old_w if preserve_existing else 0,
-                base_height=old_h if preserve_existing else 0,
-            )
-            if preserve_existing:
-                new_h = old_h + grid_h
-                expanded = Image.new("RGBA", (atlas_width, new_h), (0, 0, 0, 0))
-                expanded.alpha_composite(base_image, (0, grid_h))
-                base_image = expanded
+            force_grid_layout = any(entry.get("is_added") for entry in target_frames)
+            render_key_assignments = {}
+            if force_grid_layout:
+                target_path_ids = {entry["sprite_obj"].path_id for entry in target_frames}
+                used_render_key_ids = collect_used_sprite_render_key_ids(env, target_path_ids)
                 for entry in target_frames:
-                    clear_sprite_uv_region(base_image, entry["sprite_obj"], (old_w, old_h), grid_h)
-            else:
-                new_h = grid_h
-                base_image = Image.new("RGBA", (atlas_width, new_h), (0, 0, 0, 0))
-
-            for sprite_obj in texture_plan["all_sprites"]:
-                if sprite_obj.path_id in target_sprite_ids:
-                    continue
-                sprite_data = sprite_obj.parse_as_dict()
-                old_rect = dict(sprite_data["m_RD"]["textureRect"])
-                remap_sprite_uvs(sprite_data, (old_w, old_h), (atlas_width, new_h), old_rect, old_rect)
-                sprite_obj.save_typetree(sprite_data)
-
-            for (entry, repl, rect_w, rect_h), (left, top, _, _) in zip(packed_frames, placements):
-                sprite_obj = entry["sprite_obj"]
-                sprite_data = sprite_obj.parse_as_dict()
-                new_rect = {
-                    "x": left,
-                    "y": new_h - (top + rect_h),
-                    "width": rect_w,
-                    "height": rect_h,
-                }
-
-                pivot01 = entry.get("pivot01")
-                if isinstance(pivot01, list) and len(pivot01) >= 2:
-                    sprite_data["m_Pivot"]["x"] = to_float(pivot01[0], sprite_data["m_Pivot"].get("x", 0.5))
-                    sprite_data["m_Pivot"]["y"] = to_float(pivot01[1], sprite_data["m_Pivot"].get("y", 0.5))
-
-                border = entry.get("border")
-                if isinstance(border, list) and len(border) >= 4:
-                    sprite_data["m_Border"]["x"] = to_float(border[0], 0.0)
-                    sprite_data["m_Border"]["y"] = to_float(border[1], 0.0)
-                    sprite_data["m_Border"]["z"] = to_float(border[2], 0.0)
-                    sprite_data["m_Border"]["w"] = to_float(border[3], 0.0)
-
-                build_rect_sprite_geometry(
-                    sprite_data,
-                    (atlas_width, new_h),
-                    new_rect,
-                    sprite_data.get("m_PixelsToUnits", 100.0),
-                    pivot01,
-                )
-
-                sprite_obj.save_typetree(sprite_data)
-                entry["rect"] = new_rect
-                entry["image"] = repl
-
-            for entry in texture_plan["frames"]:
+                    render_key_assignments[entry["sprite_obj"].path_id] = generate_random_meta_path_id(used_render_key_ids)
+            unchanged_frames = 0
+            replacement_frames = []
+            for entry in target_frames:
                 try:
-                    composite_image_to_rect(base_image, entry["rect"], entry.get("image") or Image.open(entry["image_path"]).convert("RGBA"))
+                    replacement_image = Image.open(entry["image_path"]).convert("RGBA")
+                    current_sprite_image = entry["sprite_obj"].read().image.convert("RGBA")
+                    is_same = (
+                        current_sprite_image.size == replacement_image.size
+                        and current_sprite_image.tobytes() == replacement_image.tobytes()
+                    )
+                    if is_same:
+                        unchanged_frames += 1
+                    replacement_frames.append((entry, replacement_image, is_same))
                 except Exception as ex:
                     print(f"[IMPORT-CLIPS] 贴图写入失败: {entry['image_path']} -> {ex}")
+
+            if replacement_frames and unchanged_frames == len(target_frames):
+                print(f"[IMPORT-CLIPS] 所有帧图片均未变化，跳过纹理保存: {texture_pid}")
+                continue
+
+            cell_w, cell_h = infer_mod_atlas_cell_size(texture_plan, target_frames)
+            cols = infer_mod_atlas_columns(texture_data, cell_w, cell_h, len(target_frames))
+            rows = max(1, round_int(math.ceil(len(target_frames) / float(cols))))
+            atlas_width = cell_w * cols
+            atlas_height = cell_h * rows
+            base_image = Image.new("RGBA", (atlas_width, atlas_height), (0, 0, 0, 0))
+
+            for index, (entry, replacement_image, _) in enumerate(replacement_frames):
+                sprite_obj = entry["sprite_obj"]
+                sprite_data = sprite_obj.parse_as_dict()
+                assigned_render_key = render_key_assignments.get(sprite_obj.path_id)
+                if assigned_render_key is not None:
+                    render_key = sprite_data.get("m_RenderDataKey")
+                    if isinstance(render_key, list) and len(render_key) >= 2:
+                        render_key[1] = int(assigned_render_key)
+                cell_rect = get_existing_cell_rect(sprite_data, cell_w, cell_h, index, cols, rows, prefer_existing=not force_grid_layout)
+                pivot01 = entry.get("pivot01") if isinstance(entry.get("pivot01"), list) and len(entry.get("pivot01")) >= 2 else [0.5, 0.0]
+                border = entry.get("border") if isinstance(entry.get("border"), list) and len(entry.get("border")) >= 4 else [0.0, 0.0, 0.0, 0.0]
+                new_rect = rebuild_sprite_as_mod_cell(
+                    sprite_data,
+                    (atlas_width, atlas_height),
+                    cell_rect,
+                    replacement_image,
+                    sprite_data.get("m_PixelsToUnits", 100.0),
+                    pivot01,
+                    border,
+                    force_rect_mesh=force_rect_mesh,
+                )
+                left = round_int(new_rect["x"])
+                top = atlas_height - round_int(new_rect["y"] + new_rect["height"])
+                base_image.alpha_composite(replacement_image, (left, top))
+                sprite_obj.save_typetree(sprite_data)
+                entry["rect"] = new_rect
 
             texture_data.set_image(base_image)
             texture_data.save()
             changed_textures += 1
-            print(f"[IMPORT-CLIPS] 已更新纹理 {texture_pid}，应用 {len(texture_plan['frames'])} 帧")
+            content_modified = True
+            mesh_mode = "rect" if force_rect_mesh else "tight"
+            print(f"[IMPORT-CLIPS] 已重建 embedded 纹理 {texture_pid}，atlas={atlas_width}x{atlas_height}，mesh={mesh_mode}，应用 {len(texture_plan['frames'])} 帧")
 
-        if updated_animations <= 0 or changed_textures <= 0:
-            print("[IMPORT-CLIPS] 没有任何动画或纹理被更新，未输出新包")
+        if not content_modified:
+            shutil.copyfile(bundle_path, out_path)
+            print(f"[IMPORT-CLIPS] 未检测到实际内容变化，已复制原始 AB 到: {out_path}")
             return
 
         save_bundle_env(
@@ -1799,6 +2589,7 @@ def import_clip_folders(bundle_path: str, export_root: str, out_path: str = None
             bundle_path,
             out_path,
             [texture_plan["texture_obj"] for texture_plan in texture_plans.values()],
+            force_full_repack=bool(sprite_asset_changes),
         )
     finally:
         if temp_file and os.path.isfile(temp_file):
