@@ -15,6 +15,7 @@ namespace ResourceModLoader
     {
         public readonly string basePath;
         public readonly string executable = "";
+        public readonly (string shell, string[] args) shell = ("", []);
         public readonly string appName = "";
         public readonly string localPath = "";
         public readonly string modPath = "";
@@ -51,6 +52,9 @@ namespace ResourceModLoader
             localPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "AppData", "LocalLow");
             executable = Path.Combine(baseDir, appName + ".exe");
             Log.Debug($"使用 {executable} 作为可执行文件");
+            shell = GameExecutableSeeker.AutoFindGameStartupShell(executable);
+            Log.Debug($"使用 {shell} 来启动游戏");
+
             string[] appData = File.ReadAllLines(Path.Combine(baseDir, appName + "_Data", "app.info"));
             if (appData.Length < 2)
             {
@@ -211,7 +215,7 @@ namespace ResourceModLoader
         }
 
 
-
+        // 执行资源
         public void ProcessMods(bool resetAfterDone)
         {
             try

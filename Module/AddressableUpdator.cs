@@ -34,9 +34,7 @@ namespace ResourceModLoader.Module
             File.Copy(setting, setting + ".backup", true);
             File.WriteAllText(setting, content.Substring(0, pIdx) + "http://127.0.0.1:17549/" + content.Substring(pIdx).Replace("http://127.0.0.1:17549/",""));
 
-            gameProcess = Process.Start(new ProcessStartInfo{
-                FileName = mod.executable
-            });
+            gameProcess = Process.Start(mod.shell.shell,mod.shell.args);
             WaitForData();
             recoveryBackup();
         }
@@ -204,7 +202,7 @@ namespace ResourceModLoader.Module
             mod.ProcessMods(false);
             if (requireReboot)
             {
-                Process.Start(mod.executable);
+                Process.Start(mod.shell.shell,mod.shell.args);
             }
         }
     }
