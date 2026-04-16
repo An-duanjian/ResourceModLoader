@@ -33,6 +33,7 @@ namespace ResourceModLoader.Module
 
             File.Copy(setting, setting + ".backup", true);
             File.WriteAllText(setting, content.Substring(0, pIdx) + "http://127.0.0.1:17549/" + content.Substring(pIdx).Replace("http://127.0.0.1:17549/",""));
+            hasBackup = true;
 
             gameProcess = Process.Start(mod.shell.shell,mod.shell.args);
             WaitForData();
