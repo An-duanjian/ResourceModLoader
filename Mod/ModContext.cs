@@ -17,9 +17,11 @@ namespace ResourceModLoader.Mod
         public List<string> forcePatchNames = new List<string>();
         public 
         Dictionary<string,string> lastRedirect = new Dictionary<string,string>();
-        public ModContext(AddressableMgr mgr, BundleScan scan) {
+        public ModRecords modRecords;
+        public ModContext(AddressableMgr mgr, BundleScan scan,ModRecords modRecords) {
             this.addressableMgr = mgr;
             this.scan = scan;
+            this.modRecords = modRecords;
         }
         public void Redirect(string name,string bundleFile,string container,string originalBundle,bool noReport = false)
         {
@@ -90,6 +92,15 @@ namespace ResourceModLoader.Mod
             {
                 modItems[i].Init(this, addressableMgr, scan);
             }
+        }
+        public List<string> CollectHashList(string name)
+        {
+            List<string> results = new List<string>();
+            foreach (IModItem modItem in modItems)
+            {
+                results.AddRange(modItem.getHashes(name));
+            }
+            return results;
         }
         public bool IsRequiredPatch(string name,string addressableName)
         {

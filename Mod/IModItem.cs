@@ -21,5 +21,6 @@ namespace ResourceModLoader.Mod
         virtual public void PostPatch(string bundleName,string addressableName, AssetsManager manager, BundleFileInstance bundle, AssetsFileInstance[] assets, Dictionary<long, string>[] patched, List<List<Tuple<int, long, byte[], int?>>> patches) {  }
         virtual public List<string> GetToPatchBundles(string targetBundleName) { return []; }
         virtual public bool RequirePatch(string name, string addressableName) { return false;}
+        virtual public List<string> getHashes(string name){ return []; }
     }
 }

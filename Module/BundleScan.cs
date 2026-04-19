@@ -19,15 +19,17 @@ namespace ResourceModLoader.Module
         string DEBUG_CT = "";
         string local;
         string cache;
+        private ModRecords modRecords;
         bool hasBuiltFileContainer = false;
         List<Tuple<string, string>> bundleFiles = new List<Tuple<string, string>>();
         List<string> bundleFilesNames = new List<string>();
         Dictionary<string, List<Tuple<string, string>>> bundleFileNameContainerList = new Dictionary<string, List<Tuple<string, string>>>();
-        public BundleScan(AddressableMgr ccd, string local, string cache)
+        public BundleScan(AddressableMgr ccd,ModRecords modRecords, string local, string cache)
         {
             this.ccd = ccd;
             this.local = local;
             this.cache = cache;
+            this.modRecords = modRecords;
             foreach(var f in ccd.GetAllBundles())
             {
                 if(!Path.Exists(GetBundleLocalPath(f.Item1)))
@@ -73,7 +75,7 @@ namespace ResourceModLoader.Module
             var abdef = assetFile.GetAssetsOfType(AssetClassID.AssetBundle).First();
             var fab = manager.GetBaseField(asset, abdef);
             string bundleName = FindBundleFileName(fab["m_Name"].AsString);
-
+            bundleName = modRecords.getMappedBundleOrReturn(bundleName);
             var targetAssetInfo = GetBundle(bundleName);
             if (targetAssetInfo == null)
             {
@@ -82,6 +84,7 @@ namespace ResourceModLoader.Module
                 {
                     Log.Info($"Bundle {bundleName} 被识别为 {matchedBundle} ");
                     Report.Warning(bundlePath, $"当前文件被识别为 {matchedBundle}，这不总是正确");
+                    modRecords.setBundleMap(bundleName, matchedBundle);
                     bundleName = matchedBundle;
                     targetAssetInfo = GetBundle(bundleName);
                 }

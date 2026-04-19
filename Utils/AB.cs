@@ -605,6 +605,7 @@ namespace ResourceModLoader.Utils
                 {
                     var asf = manager.LoadAssetsFileFromBundle(bundle, fileIdx);
                     var asif = asf.file.GetAssetInfo(pathId);
+                    if (asif == null) continue;
                     var field = manager.GetBaseField(asf, asif);
                     if (field["m_StreamData"].IsDummy) continue;
                     if (field["m_StreamData"]["size"].AsULong == 0) continue;

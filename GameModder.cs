@@ -23,6 +23,7 @@ namespace ResourceModLoader
         public BundleScan scan;
         public AddressableMgr addressableMgr;
         public ModContext modContext;
+        public ModRecords modRecord;
         public bool isValid;
         public bool mergeMode = false;
         public GameModder(string baseDir) {
@@ -112,8 +113,9 @@ namespace ResourceModLoader
                 return;
             }
 
-            scan = new BundleScan(addressableMgr, Path.Combine(basePath, appName + "_Data"), Path.Combine(presistDir, "AssetBundles"));
-            modContext = new ModContext(addressableMgr, scan);
+            modRecord = new ModRecords(this);
+            scan = new BundleScan(addressableMgr,modRecord, Path.Combine(basePath, appName + "_Data"), Path.Combine(presistDir, "AssetBundles"));
+            modContext = new ModContext(addressableMgr, scan, modRecord);
         }
 
         // 安装
@@ -240,7 +242,7 @@ namespace ResourceModLoader
             {
                 addressableMgr.Reset();
                 Report.Reset();
-                modContext = new ModContext(addressableMgr, scan);
+                modContext = new ModContext(addressableMgr, scan, modRecord);
             }
         }
 
@@ -274,6 +276,8 @@ namespace ResourceModLoader
                     if ((Path.GetExtension(file).ToLower() == ".bundle" || Path.GetFileName(file) == "__data"))
                     {
                         var list = scan.CalculateToReplaceItems(file);
+                        if (this.mergeMode)
+                            list = new Tuple<string, List<Tuple<string, string>>>(list.Item1, []);
                         modContext.Add(new BundleItem(priority, file, list.Item1, list.Item2));
                     }
                     if (Path.GetExtension(file).ToLower() == ".zip")
@@ -291,7 +295,7 @@ namespace ResourceModLoader
                     if (WrappableFileItem.IsValid(file, addressableMgr) && !this.mergeMode)
                         modContext.Add(new WrappableFileItem(priority, file));
                     if(ReplaceFileItem.IsValid(file, addressableMgr) && this.mergeMode)
-                        modContext.Add(new WrappableFileItem(priority, file));
+                        modContext.Add(new ReplaceFileItem(priority, file));
                     if (CommonPatchItem.IsValid(file))
                         modContext.Add(new CommonPatchItem(priority, file));
                 }
@@ -320,7 +324,19 @@ namespace ResourceModLoader
                 var toPatch = modContext.CollectToPatch(bundleName);
                 if (toPatch.Any() || modContext.IsRequiredPatch(bundleName, ""))
                 {
-                    var (result, conflicts) = AB.MergeBundles(scan.GetBundleLocalPath(bundleName), toPatch, Path.Combine(basePath, "_generated", bundleName), (m, b, a, p, r) => modContext.PostPatch(bundleName, "", m, b, a, p, r));
+                    var hashList = modContext.CollectHashList(bundleName);
+
+                    bool result = true;
+                    List<Tuple<string, string, string>> conflicts = [];
+
+                    if (modRecord.requireReApply(bundleName, hashList))
+                    {
+                        (result, conflicts) = AB.MergeBundles(scan.GetBundleLocalPath(bundleName), toPatch, Path.Combine(basePath, "_generated", bundleName), (m, b, a, p, r) => modContext.PostPatch(bundleName, "", m, b, a, p, r));
+                    }
+                    else {
+                        Log.Info("从缓存的修补结果中加载" + bundleName);
+                        conflicts = modRecord.getConflicts(bundleName);
+                    }
 
                     if (result)
                     {
@@ -329,6 +345,7 @@ namespace ResourceModLoader
                         {
                             Report.Warning(i, $"在修补 {name} 时和 {c} 冲突");
                         }
+                        modRecord.setSourceHashList(bundleName, hashList,conflicts);
                     }
                     else
                     {
@@ -353,6 +370,7 @@ namespace ResourceModLoader
             modContext.Sort();
             MergeAndPatchBundles();
             modContext.ApplyAll();
+            modRecord.save();
         }
     }
 }
