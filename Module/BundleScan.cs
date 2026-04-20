@@ -74,17 +74,27 @@ namespace ResourceModLoader.Module
 
             var abdef = assetFile.GetAssetsOfType(AssetClassID.AssetBundle).First();
             var fab = manager.GetBaseField(asset, abdef);
-            string bundleName = FindBundleFileName(fab["m_Name"].AsString);
-            bundleName = modRecords.getMappedBundleOrReturn(bundleName);
+            string oBundleName = fab["m_Name"].AsString;
+            string bundleName = FindBundleFileName(oBundleName);
+            if (bundleName == "")
+            {
+                bundleName = modRecords.getMappedBundle(oBundleName);
+                if(bundleName != "")
+                {
+                    Log.Info($"Bundle {oBundleName} 被识别为 {bundleName} ");
+                    Report.Warning(bundlePath, $"当前文件被识别为 {bundleName}，这不总是正确");
+                }
+            }
+
             var targetAssetInfo = GetBundle(bundleName);
             if (targetAssetInfo == null)
             {
                 var matchedBundle = MatchForKnownBundleByFileContainer(manager, asset);
                 if (matchedBundle != "")
                 {
-                    Log.Info($"Bundle {bundleName} 被识别为 {matchedBundle} ");
+                    Log.Info($"Bundle {oBundleName} 被识别为 {matchedBundle} ");
                     Report.Warning(bundlePath, $"当前文件被识别为 {matchedBundle}，这不总是正确");
-                    modRecords.setBundleMap(bundleName, matchedBundle);
+                    modRecords.setBundleMap(oBundleName, matchedBundle);
                     bundleName = matchedBundle;
                     targetAssetInfo = GetBundle(bundleName);
                 }

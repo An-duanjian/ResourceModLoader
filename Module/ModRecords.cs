@@ -24,8 +24,9 @@ namespace ResourceModLoader.Module
     class Patched
     {
         public string Hash { get; set; }
-        public List<Tuple<string, string, string>> Conflicts { get; set; }
+        public List<List<string>> Conflicts { get; set; }
     }
+
     class ModRecords
     {
         private AddressableMgr addr;
@@ -37,11 +38,16 @@ namespace ResourceModLoader.Module
             modRecord = new ModRecord();
 
             if (Path.Exists(Path.Combine(baseDir, "rml.data"))){
-                var tModRecord = JsonSerializer.Deserialize<ModRecord>(File.ReadAllText(Path.Combine(baseDir, "rml.data")));
-                if(tModRecord != null)
+                try
                 {
-                    modRecord = tModRecord;
-                    validAll();
+                    var tModRecord = JsonSerializer.Deserialize<ModRecord>(File.ReadAllText(Path.Combine(baseDir, "rml.data")));
+                    if (tModRecord != null)
+                    {
+                        modRecord = tModRecord;
+                        validAll();
+                    }
+                }catch {
+                    Log.Warn("无法加载缓存文件");
                 }
             }
         }
@@ -61,11 +67,11 @@ namespace ResourceModLoader.Module
             
         }
 
-        public string getMappedBundleOrReturn(string bundleName)
+        public string getMappedBundle(string bundleName)
         {
             if(modRecord.BundleMapper.ContainsKey(bundleName))
                 return modRecord.BundleMapper[bundleName];
-            return bundleName;
+            return "";
         }
 
         public void setBundleMap(string bundleName,string target)
@@ -92,14 +98,25 @@ namespace ResourceModLoader.Module
         {
             if (modRecord.BundlePatchSources.ContainsKey(bundleName))
             {
-                return modRecord.BundlePatchSources[bundleName].Conflicts;
+                var results = new List<Tuple<string, string, string>>();
+                foreach (var c in modRecord.BundlePatchSources[bundleName].Conflicts)
+                {
+                    if (c.Count>= 3)
+                        results.Add(new Tuple<string, string, string>(c[0], c[1], c[2]));
+                }
+                return results;
             }
             return [];
         }
         public void setSourceHashList(string bundleName,List<string> sourceHashList,List<Tuple<string,string,string>> conflicts)
         {
             string hash= getSourceHashListConcat(sourceHashList);
-            modRecord.BundlePatchSources[bundleName] = new Patched { Hash = hash,Conflicts=conflicts };
+            List<List<string>> cl = new List<List<string>>();
+            foreach (var c in conflicts)
+            {
+                cl.Add([c.Item1, c.Item2, c.Item3]);
+            }
+            modRecord.BundlePatchSources[bundleName] = new Patched { Hash = hash,Conflicts=cl };
         }
 
         public void save()
