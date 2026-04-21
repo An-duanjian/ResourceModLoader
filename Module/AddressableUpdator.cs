@@ -27,12 +27,13 @@ namespace ResourceModLoader.Module
         {
             string setting = Path.Combine(mod.basePath, mod.appName + "_Data", "StreamingAssets", "aa", "settings.json");
             string content = File.ReadAllText(setting);
+            content = content.Replace("http://127.0.0.1:17549/", "");
             int pIdx = content.IndexOf("AddressablesMainContentCatalogRemoteHash");
             const string FL1 = "m_InternalId\":\"";
             pIdx = content.IndexOf(FL1, pIdx) + FL1.Length;
-
-            File.Copy(setting, setting + ".backup", true);
-            File.WriteAllText(setting, content.Substring(0, pIdx) + "http://127.0.0.1:17549/" + content.Substring(pIdx).Replace("http://127.0.0.1:17549/",""));
+            
+            File.WriteAllText(content, setting + ".backup");
+            File.WriteAllText(setting, content.Substring(0, pIdx) + "http://127.0.0.1:17549/" + content.Substring(pIdx));
             hasBackup = true;
 
             gameProcess = Process.Start(mod.shell.shell,mod.shell.args);

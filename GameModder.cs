@@ -35,7 +35,7 @@ namespace ResourceModLoader
                 {
                     if (subDir.EndsWith("_Data"))
                     {
-                        appName = subDir.Substring(0, subDir.Length - 5);
+                        appName = Path.GetFileName(subDir.Substring(0, subDir.Length - 5));
                     }
                 }
                 if (appName != "")
@@ -142,12 +142,13 @@ namespace ResourceModLoader
         {
             int result = 1;
             string lastInstall = "";
+            string tVer = "";
             bool firstRun = true;
             if (Path.Exists(Path.Combine(basePath, "rml.info")))
             {
                 firstRun = false;
                 var infos = (File.ReadAllText(Path.Combine(basePath, "rml.info")) + "\n\n").Split("\n");
-                string tVer = infos[1];
+                tVer = infos[1];
                 lastInstall = infos[2];
                 string[] curVer = Program.VERSION.Split(".");
                 string[] installedVer = tVer.Split(".");
@@ -173,16 +174,24 @@ namespace ResourceModLoader
                 Log.Debug("当前版本 " + Program.VERSION);
                 return;
             }
+            string self = Process.GetCurrentProcess().MainModule.FileName;
             if (result < 0)
             {
-                Log.Error("已经安装更新版本，使用更新的版本进行安装");
-                Process.Start(Path.Combine(basePath, lastInstall), args).WaitForExit();
-                Environment.Exit(1);
-                return;
+                if (Path.GetDirectoryName(self) == basePath)
+                {
+                    Log.Warn("已从更新的版本 "+tVer+" 降级到 "+Program.VERSION);
+                    result = 1;
+                }
+                else
+                {
+                    Log.Error("已经安装更新版本，使用更新的版本进行安装");
+                    Process.Start(Path.Combine(basePath, lastInstall), args).WaitForExit();
+                    Environment.Exit(1);
+                    return;
+                }
             }
 
 
-            string self = Process.GetCurrentProcess().MainModule.FileName;
             string targetFileName = lastInstall;
             if (targetFileName == "")
                 targetFileName = Path.GetFileName(self);
@@ -215,6 +224,15 @@ namespace ResourceModLoader
             }
             File.WriteAllText(Path.Combine(basePath, "rml.info"), "#这是ResourceModLoader的安装信息记录文件，用于管理版本\n" + Program.VERSION + "\n" + targetFileName);
             Log.Info("版本号更新到" + Program.VERSION);
+            try
+            {
+                ShortcutUtils.CreateShortcut(basePath, "RML启动" + appName, Path.Combine(basePath, targetFileName), "u", "使用RML启动并更新" + appName, executable);
+                Log.SuccessAll($"你可以通过当前目录下的“RML启动{appName}”来启动并确保mod被应用到对应的软件");
+            }
+            catch
+            {
+                Log.Warn("无法创建快速启动快捷方式");
+            }
         }
 
 

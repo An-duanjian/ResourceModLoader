@@ -6,6 +6,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
 using static System.Net.Mime.MediaTypeNames;
@@ -106,6 +107,12 @@ namespace ResourceModLoader.Mod.Item
                     }
                 }
             }
+        }
+        public override List<string> getHashes(string name)
+        {
+            if (name == bundleName)
+                return [Convert.ToHexString(MD5.HashData(File.ReadAllBytes(source)))];
+            return base.getHashes(name);
         }
     }
 }

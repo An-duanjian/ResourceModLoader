@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
 
@@ -29,6 +30,14 @@ namespace ResourceModLoader.Mod.Item
         {
             if(addressables.Count == 0  && bundleName == name)
                 return new List<string> { bundlePath };
+            return [];
+        }
+        public override List<string> getHashes(string name)
+        {
+            if(name == bundleName)
+            {
+                return [Convert.ToHexString(MD5.HashData(File.ReadAllBytes(bundlePath)))];
+            }
             return [];
         }
     }

@@ -387,6 +387,7 @@ namespace ResourceModLoader.Utils
                     break;
                 }
                 patches.Add(r);
+                Log.Info($"从 {file} 提取和替换了共 {r.Count} 个文件");
             }
             if (!result) {
                 Log.FinalizeProgress();
@@ -478,9 +479,9 @@ namespace ResourceModLoader.Utils
             {
                 incomingBundle = incomingManager.LoadBundleFile(toLoad);
             }
-            var ian = incomingBundle.file.GetAllFileNames();
+            
             bool found = false;
-            for (int i = 0; i < ian.Count; i++)
+            for (int i = 0; i < incomingBundle.file.BlockAndDirInfo.DirectoryInfos.Count; i++)
             {
                 if (incomingBundle.file.IsAssetsFile(i)) continue;
                 //to patch资产有resS，但是现在的没有，这种情况下合并很复杂，暂时不处理

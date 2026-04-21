@@ -90,7 +90,11 @@ namespace ResourceModLoader.Module
         {
             if (modRecord.BundlePatchSources.ContainsKey(bundleName))
             {
-                return modRecord.BundlePatchSources[bundleName].Hash != getSourceHashListConcat(sourceHashList);
+                if (modRecord.BundlePatchSources[bundleName].Hash != getSourceHashListConcat(sourceHashList))
+                    return true;
+                if(!Path.Exists(Path.Combine(this.baseDir, "_generated", bundleName)))
+                    return true;
+                return false;
             }
             return true;
         }

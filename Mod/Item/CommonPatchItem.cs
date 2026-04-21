@@ -4,6 +4,7 @@ using ResourceModLoader.Module;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
 
@@ -131,6 +132,18 @@ namespace ResourceModLoader.Mod.Item
                 s = s.Substring(0, s.Length - 6);
             var t= (s +"@@").Split('@');
             return new Tuple<string, string, string>(t[0], t[1], t[2]);
+        }
+
+        public override List<string> getHashes(string name)
+        {
+            if(name == this.bundle)
+            {
+                List<string> hashes = new List<string>();
+                foreach (string s in source)
+                    hashes.Add(Convert.ToHexString(MD5.HashData(File.ReadAllBytes(s))));
+                return hashes;
+            }
+            return [];
         }
     }
 }
