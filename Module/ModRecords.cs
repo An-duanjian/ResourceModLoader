@@ -12,6 +12,7 @@ namespace ResourceModLoader.Module
 {
     class ModRecord
     {
+        public string version;
         public Dictionary<string, string> BundleMapper { get; set; }
         public Dictionary<string, Patched> BundlePatchSources { get; set; }
 
@@ -43,8 +44,11 @@ namespace ResourceModLoader.Module
                     var tModRecord = JsonSerializer.Deserialize<ModRecord>(File.ReadAllText(Path.Combine(baseDir, "rml.data")));
                     if (tModRecord != null)
                     {
-                        modRecord = tModRecord;
-                        validAll();
+                        if (tModRecord.version == Program.VERSION)
+                        {
+                            modRecord = tModRecord;
+                            validAll();
+                        }
                     }
                 }catch {
                     Log.Warn("无法加载缓存文件");
@@ -125,6 +129,8 @@ namespace ResourceModLoader.Module
 
         public void save()
         {
+
+            modRecord.version = Program.VERSION;
             File.WriteAllText(Path.Combine(baseDir, "rml.data"),JsonSerializer.Serialize<ModRecord>(modRecord));
         }
     }

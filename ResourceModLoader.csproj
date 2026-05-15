@@ -8,6 +8,7 @@
 		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 		<Platforms>AnyCPU;x64</Platforms>
 		<JsonSerializerIsReflectionEnabledByDefault>true</JsonSerializerIsReflectionEnabledByDefault>
+		<ApplicationIcon>winefox.ico</ApplicationIcon>
 	</PropertyGroup>
 
   <ItemGroup>
@@ -54,6 +55,10 @@
 
   <ItemGroup>
     <EmbeddedResource Include="Resources\UnityPy\**\*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="winefox.ico" />
   </ItemGroup>
 
   <Target Name="PostBuild" AfterTargets="PostBuildEvent">

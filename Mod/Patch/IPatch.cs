@@ -15,5 +15,6 @@ namespace ResourceModLoader.Mod.Patch
         public bool PerformPatch(string source);
         public void Finalize(AssetsManager manager, AssetsFileInstance assets, AssetFileInfo file);
         public void AfterPatch(CommonPatchItem item,ModContext modContext) { }
+        public void UseDebug() { }
     }
 }

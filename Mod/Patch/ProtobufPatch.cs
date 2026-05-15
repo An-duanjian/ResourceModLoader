@@ -17,6 +17,7 @@ namespace ResourceModLoader.Mod.Patch
     {
         AssetTypeValueField field = null;
         private ReaderMessage protoObject;
+        protected bool isDebug = false;
 
         public void Init(AssetsManager manager, AssetsFileInstance assets, AssetFileInfo file)
         {
@@ -112,8 +113,13 @@ namespace ResourceModLoader.Mod.Patch
         public void Finalize(AssetsManager manager, AssetsFileInstance assets, AssetFileInfo file)
         {
             field["m_Script"].AsByteArray = protoObject.GetBytes() ;
-            File.WriteAllBytes(field["m_Name"].AsString+".buf", protoObject.GetBytes());
+            if(isDebug)
+                File.WriteAllBytes(field["m_Name"].AsString+".buf", protoObject.GetBytes());
             file.SetNewData(field);
+        }
+        public void UseDebug()
+        {
+            this.isDebug = true;
         }
     }
 }

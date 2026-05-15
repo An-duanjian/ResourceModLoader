@@ -324,7 +324,7 @@ namespace ResourceModLoader.Utils
             }
         }
 
-        public static Tuple<bool, List<Tuple<string, string, string>>> MergeBundles(string originalPath, List<string> bundles, string save, Action<AssetsManager, BundleFileInstance, AssetsFileInstance[], Dictionary<long, string>[], List<List<Tuple<int, long, byte[], int?>>>>? post = null)
+        public static Tuple<bool, List<Tuple<string, string, string>>> MergeBundles(string originalPath, List<string> bundles, string save, Action<AssetsManager, BundleFileInstance, AssetsFileInstance[], Dictionary<long, string>[], List<List<Tuple<int, long, byte[], int?>>>>? post = null,bool isDebugMode = false)
         {
             Log.Debug("开始修补" + originalPath);
             List<Tuple<string, string, string>> conflictResults = new List<Tuple<string, string, string>>();
@@ -378,7 +378,7 @@ namespace ResourceModLoader.Utils
             foreach (string file in bundles)
             {
                 Log.StepProgress(file, 1);
-                var r = PatchBundle(manager,bundle, assets, file, patched, resSRec, save + ".temp1", conflictResults);
+                var r = PatchBundle(manager,bundle, assets, file, patched, resSRec, save + ".temp1", conflictResults,isDebugMode);
                 if (r == null)
                 {
                     result = false;
@@ -458,7 +458,7 @@ namespace ResourceModLoader.Utils
             }
             return new Tuple<bool,List<Tuple<string,string,string>>>(result, conflictResults);
         }
-        private static List<Tuple<int,long, byte[], int?>>? PatchBundle(AssetsManager manager,BundleFileInstance bundleFileInst, AssetsFileInstance[] assets, string toLoad, Dictionary<long,string>[] patched,ResSRec? resS, string cacheFile,List<Tuple<string, string,string>> conflictResults)
+        private static List<Tuple<int,long, byte[], int?>>? PatchBundle(AssetsManager manager,BundleFileInstance bundleFileInst, AssetsFileInstance[] assets, string toLoad, Dictionary<long,string>[] patched,ResSRec? resS, string cacheFile,List<Tuple<string, string,string>> conflictResults, bool isDebugMode)
         {
             List<Tuple<int,long, byte[], int?>> result = new List<Tuple<int,long, byte[],int?>>();
             AssetsManager incomingManager = new AssetsManager();
@@ -549,13 +549,16 @@ namespace ResourceModLoader.Utils
                                     conflictResults.Add(new Tuple<string, string, string>(iName.AsString, toLoad, patched[ai][file.PathId]));
                                     continue;
                                 }
-                                patched[ai][file.PathId] = toLoad;
-                                result.Add(new Tuple<int, long, byte[], int?>(ai, file.PathId, buf2,null));
+                                result.Add(new Tuple<int, long, byte[], int?>(ai, file.PathId, buf2, null));
                                 if (file.PathId == incomingFile.PathId)
                                 {
                                     needCreate = false;
+                                    patched[ai][file.PathId] = toLoad;
                                 }
-                                Log.StepProgress($"Patched {iName.AsString} -> {toLoad}", 0);
+                                if (!isDebugMode)
+                                    Log.StepProgress($"Patched {iName.AsString} -> {toLoad}", 0);
+                                else
+                                    Log.Debug($"Patched {iName.AsString} -> {toLoad}");
                             }
                             else
                             {
@@ -568,10 +571,16 @@ namespace ResourceModLoader.Utils
                             if (existing == null)
                             {
                                 result.Add(new Tuple<int, long, byte[], int?>(ai, incomingFile.PathId, buf2, incomingFile.TypeId));
-                                Log.StepProgress($"Add {iName.AsString} -> {toLoad}", 0);
-                            }else if(existing.TypeId == incomingFile.TypeId)
+                                patched[ai][incomingFile.PathId] = toLoad;
+                                if (!isDebugMode)
+                                    Log.StepProgress($"Add {iName.AsString} -> {toLoad}", 0);
+                                else
+                                    Log.Debug($"Add {iName.AsString} -> {toLoad}");
+                            }
+                            else if (existing.TypeId == incomingFile.TypeId)
                             {
-                                result.Add(new Tuple<int, long, byte[], int?>(ai, incomingFile.PathId, buf2,null));
+                                result.Add(new Tuple<int, long, byte[], int?>(ai, incomingFile.PathId, buf2, null));
+                                patched[ai][incomingFile.PathId] = toLoad;
                             }
                             else
                             {

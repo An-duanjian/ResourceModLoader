@@ -32,7 +32,7 @@ namespace ResourceModLoader.Module
             const string FL1 = "m_InternalId\":\"";
             pIdx = content.IndexOf(FL1, pIdx) + FL1.Length;
             
-            File.WriteAllText(content, setting + ".backup");
+            File.WriteAllText(setting + ".backup", content);
             File.WriteAllText(setting, content.Substring(0, pIdx) + "http://127.0.0.1:17549/" + content.Substring(pIdx));
             hasBackup = true;
 

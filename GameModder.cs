@@ -26,6 +26,8 @@ namespace ResourceModLoader
         public ModRecords modRecord;
         public bool isValid;
         public bool mergeMode = false;
+        public bool isDebugMode = false;
+
         public GameModder(string baseDir) {
 
             for (int i = 0; i < 2; i++)
@@ -115,7 +117,7 @@ namespace ResourceModLoader
 
             modRecord = new ModRecords(this);
             scan = new BundleScan(addressableMgr,modRecord, Path.Combine(basePath, appName + "_Data"), Path.Combine(presistDir, "AssetBundles"));
-            modContext = new ModContext(addressableMgr, scan, modRecord);
+            modContext = new ModContext(addressableMgr, scan, modRecord,this.isDebugMode);
         }
 
         // 安装
@@ -260,7 +262,7 @@ namespace ResourceModLoader
             {
                 addressableMgr.Reset();
                 Report.Reset();
-                modContext = new ModContext(addressableMgr, scan, modRecord);
+                modContext = new ModContext(addressableMgr, scan, modRecord,isDebugMode);
             }
         }
 
@@ -349,7 +351,7 @@ namespace ResourceModLoader
 
                     if (modRecord.requireReApply(bundleName, hashList))
                     {
-                        (result, conflicts) = AB.MergeBundles(scan.GetBundleLocalPath(bundleName), toPatch, Path.Combine(basePath, "_generated", bundleName), (m, b, a, p, r) => modContext.PostPatch(bundleName, "", m, b, a, p, r));
+                        (result, conflicts) = AB.MergeBundles(scan.GetBundleLocalPath(bundleName), toPatch, Path.Combine(basePath, "_generated", bundleName), (m, b, a, p, r) => modContext.PostPatch(bundleName, "", m, b, a, p, r),this.isDebugMode);
                     }
                     else {
                         Log.Info("从缓存的修补结果中加载" + bundleName);

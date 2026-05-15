@@ -9,7 +9,7 @@ namespace ResourceModLoader
 {
     class Program
     {
-        public static string VERSION = "0.1.18";
+        public static string VERSION = "0.1.19";
         public static GameModder Modder;
         public static bool isDevMode = false;
         static void Main(string[] args)
@@ -37,6 +37,10 @@ namespace ResourceModLoader
                 else if (args[0] == "dev")
                 {
                     isDevMode = true;
+                }
+                else if (args[0] == "debug")
+                {
+                    Modder.isDebugMode= true;
                 }
                 else if (args[0] == "u" || args[0] == "update")
                 {

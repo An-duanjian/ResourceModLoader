@@ -18,10 +18,13 @@ namespace ResourceModLoader.Mod
         public 
         Dictionary<string,string> lastRedirect = new Dictionary<string,string>();
         public ModRecords modRecords;
-        public ModContext(AddressableMgr mgr, BundleScan scan,ModRecords modRecords) {
+        public bool isDebugMode;
+        public ModContext(AddressableMgr mgr, BundleScan scan,ModRecords modRecords, bool isDebugMode = false)
+        {
             this.addressableMgr = mgr;
             this.scan = scan;
             this.modRecords = modRecords;
+            this.isDebugMode = isDebugMode;
         }
         public void Redirect(string name,string bundleFile,string container,string originalBundle,bool noReport = false)
         {

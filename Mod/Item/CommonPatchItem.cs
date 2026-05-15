@@ -43,6 +43,10 @@ namespace ResourceModLoader.Mod.Item
         }
         public override void Init(ModContext context, AddressableMgr addressableMgr, BundleScan bundleScan)
         {
+            if (context.isDebugMode)
+            {
+                patchContexes.ForEach(p => p.UseDebug());
+            }
             if (addressableMgr.IsAddressableName(bundle))
                 return;
             if(bundle != "")
