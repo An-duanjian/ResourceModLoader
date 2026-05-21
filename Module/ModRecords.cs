@@ -12,10 +12,9 @@ namespace ResourceModLoader.Module
 {
     class ModRecord
     {
-        public string version;
+        public string Version { get; set; }
         public Dictionary<string, string> BundleMapper { get; set; }
         public Dictionary<string, Patched> BundlePatchSources { get; set; }
-
         public ModRecord()
         {
             BundleMapper = new Dictionary<string, string>();
@@ -44,7 +43,7 @@ namespace ResourceModLoader.Module
                     var tModRecord = JsonSerializer.Deserialize<ModRecord>(File.ReadAllText(Path.Combine(baseDir, "rml.data")));
                     if (tModRecord != null)
                     {
-                        if (tModRecord.version == Program.VERSION)
+                        if (tModRecord.Version == Program.VERSION)
                         {
                             modRecord = tModRecord;
                             validAll();
@@ -129,8 +128,7 @@ namespace ResourceModLoader.Module
 
         public void save()
         {
-
-            modRecord.version = Program.VERSION;
+            modRecord.Version = Program.VERSION;
             File.WriteAllText(Path.Combine(baseDir, "rml.data"),JsonSerializer.Serialize<ModRecord>(modRecord));
         }
     }

@@ -32,7 +32,7 @@ namespace ResourceModLoader.Mod.Item
                 return new List<string> { bundlePath };
             return [];
         }
-        public override List<string> getHashes(string name)
+        public override List<string>? getHashes(string name)
         {
             if(name == bundleName)
             {

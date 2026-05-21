@@ -5,6 +5,7 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
@@ -18,6 +19,7 @@ namespace ResourceModLoader.Mod.Item
         public class ModDescription
         {
             public string? Name { get; set; }
+            public string? Version { get; set; }
             public string? BaseDir { get; set; }
             public List<string>? Patch { get; set; }
             public List<Bundle>? Bundle { get; set; }
@@ -55,6 +57,13 @@ namespace ResourceModLoader.Mod.Item
                 Report.Error(file, "非法的Mod JSON");
                 return;
             }
+            if(content.Version !=  null && content.Version != "" && Util.versionCompare(Program.VERSION,content.Version) < 0)
+            {
+                Log.Warn($"{file}要求RML版本不低于{content.Version}，当前版本是{Program.VERSION}");
+                Report.Error(file, $"{file}要求RML版本不低于{content.Version}，当前版本是{Program.VERSION}");
+                content = null;
+                return;
+            }
             string name = Path.GetFileName(Path.GetDirectoryName(file));
             if(content.Name != null)
             {
@@ -78,6 +87,16 @@ namespace ResourceModLoader.Mod.Item
                 {
                     context.Add(new CommonPatchItem(priority, Path.Combine(GetBaseDir(), item)));
                     Report.SetModPack(Path.Combine(GetBaseDir(), item), this.file);
+                }
+            }
+            if (content != null && content.Bundle != null)
+            {
+                foreach (var item in content.Bundle)
+                {
+                    Tuple<string, List<Tuple<string, string>>> tb = bundleScan.CalculateToReplaceItems(Path.Combine(GetBaseDir(), item.File), item.Target);
+                    if (tb.Item1 == "UNK")
+                        Report.Error(file,$"{item.Target}无法找到对应文件");
+                    item.Target = tb.Item1;
                 }
             }
         }
@@ -152,6 +171,20 @@ namespace ResourceModLoader.Mod.Item
                 }
             }
             return bundles;
+        }
+        public override List<string> getHashes(string name)
+        {
+            if (content == null) return [];
+            List<string> hashes = new List<string>();
+            if(content.Bundle != null)
+                foreach (var patch in content.Bundle)
+                {
+                    if (patch.Target == name && File.Exists(Path.Combine(GetBaseDir(), patch.File)))
+                    {
+                        hashes.Add(Convert.ToHexString(MD5.HashData(File.ReadAllBytes(Path.Combine(GetBaseDir(), patch.File)))));
+                    }
+                }
+            return hashes;
         }
     }
 }

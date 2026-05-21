@@ -8,6 +8,23 @@ namespace ResourceModLoader.Utils
 {
     internal class Util
     {
+        public static int versionCompare(string a, string b)
+        {
+            string[] curVer = a.Split(".");
+            string[] installedVer = b.Split(".");
+            int result = 0;
+            for (int i = 0; i < curVer.Length + 1 && i < installedVer.Length + 1; i++)
+            {
+                if (i == curVer.Length || i == installedVer.Length) break;
+                if (int.Parse(curVer[i]) == int.Parse(installedVer[i])) continue;
+                if (int.Parse(curVer[i]) < int.Parse(installedVer[i]))
+                    result = -1;
+                else
+                    result = 1;
+                break;
+            }
+            return result;
+        }
         public static int TailEqualLen(string s1, string s2)
         {
             for (int i = 0; i < s1.Length && i < s2.Length; i++)

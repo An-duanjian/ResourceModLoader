@@ -92,6 +92,32 @@ namespace ResourceModLoader.Module
             }
             return results;
         }
+        public List<Tuple<string, string, int>> GetAllBundlesWithCatalog()
+        {
+            List<Tuple<string, string, int>> results = new List<Tuple<string, string, int>>();
+            HashSet<string> seen = new HashSet<string>();
+            for (int i = 0; i < contentCatalogDatas.Count; i++)
+            {
+                var ccd = contentCatalogDatas[i];
+                foreach (var rll in ccd.Resources)
+                {
+                    foreach (var rl in rll.Value)
+                    {
+                        if (rl.ProviderId != "UnityEngine.ResourceManagement.ResourceProviders.AssetBundleProvider")
+                            continue;
+                        if (seen.Contains(rl.PrimaryKey))
+                            continue;
+                        if (rl.Data is WrappedSerializedObject wo && wo.Object is AssetBundleRequestOptions abro)
+                        {
+                            results.Add(new Tuple<string, string, int>(rll.Key.ToString(), abro.BundleName, i));
+                            seen.Add(rl.PrimaryKey);
+                            break;
+                        }
+                    }
+                }
+            }
+            return results;
+        }
         public void Reset()
         {
             List<string> toLoad = new List<string>();

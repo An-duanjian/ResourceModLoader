@@ -49,35 +49,70 @@ namespace ResourceModLoader.Mod.Item
             }
             if (addressableMgr.IsAddressableName(bundle))
                 return;
-            if(bundle != "")
+            if (bundle != "")
+            {
+                var mb = context.modRecords.getMappedBundle(bundle);
+                if (mb != "" && addressableMgr.IsAddressableName(mb))
+                {
+                    bundle = mb;
+                    foreach (var s in source)
+                        Report.Warning(s, "来自目标匹配的文件");
+                    return;
+                }
+            }
+            if (bundle != "")
                 Log.Warn($"{bundle}不是游戏的一个资产，正在尝试匹配可能的项目");
             string tBundle = "";
             string tContainer = container;
-            int found = 0;
-            foreach(var b in bundleScan.GetAllBundleContainerName())
+            var catalogMatchCounts = new Dictionary<int, int>();
+            var catalogMatchBundle = new Dictionary<int, string>();
+            var catalogMatchContainer = new Dictionary<int, string>();
+            foreach(var b in bundleScan.GetAllBundleContainerNameWithCatalog())
             {
-                string bk = b.Key;
-                foreach(var (c,f) in b.Value)
+                string bk = b.Item1;
+                int catIdx = b.Item3;
+                foreach(var (c,f) in b.Item2)
                 {
                     if(f == name && (c == container || container == ""))
                     {
-                        found++;
-                        tBundle = bk;
-                        tContainer = c;
+                        if (!catalogMatchCounts.ContainsKey(catIdx))
+                            catalogMatchCounts[catIdx] = 0;
+                        catalogMatchCounts[catIdx]++;
+                        catalogMatchBundle[catIdx] = bk;
+                        catalogMatchContainer[catIdx] = c;
                     }
                 }
             }
-            if(found == 0) {
-                foreach (var s in source)
-                    Report.Error(s, "未匹配任何需要修补的bundle文件");
-            }else if(found > 1) {
+
+            bool anyAmbiguous = false;
+            int firstMatchCat = -1;
+            foreach (var kvp in catalogMatchCounts.OrderBy(k => k.Key))
+            {
+                int cnt = kvp.Value;
+                if (cnt > 1)
+                {
+                    anyAmbiguous = true;
+                    break;
+                }
+                if (cnt == 1 && firstMatchCat == -1)
+                    firstMatchCat = kvp.Key;
+            }
+
+            if(anyAmbiguous) {
                 foreach (var s in source)
                     Report.Error(s, "匹配了多个bundle文件，不能确定目标");
+            }else if(firstMatchCat == -1) {
+                foreach (var s in source)
+                    Report.Error(s, "未匹配任何需要修补的bundle文件");
             }
             else
             {
+                tBundle = catalogMatchBundle[firstMatchCat];
+                tContainer = catalogMatchContainer[firstMatchCat];
                 if (bundle != "")
                     Log.Warn($"{bundle}.{container}被匹配到{tBundle}.{tContainer}");
+                if(bundle != "")
+                    context.modRecords.setBundleMap(bundle, tBundle);
                 bundle = tBundle;
                 container = tContainer;
                 foreach (var s in source)
@@ -138,15 +173,10 @@ namespace ResourceModLoader.Mod.Item
             return new Tuple<string, string, string>(t[0], t[1], t[2]);
         }
 
-        public override List<string> getHashes(string name)
+        public override List<string>? getHashes(string name)
         {
-            if(name == this.bundle)
-            {
-                List<string> hashes = new List<string>();
-                foreach (string s in source)
-                    hashes.Add(Convert.ToHexString(MD5.HashData(File.ReadAllBytes(s))));
-                return hashes;
-            }
+            if(name == this.bundle && ext == ".fgui")
+                return null;
             return [];
         }
     }

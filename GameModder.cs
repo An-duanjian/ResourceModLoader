@@ -6,6 +6,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
 
@@ -152,19 +153,7 @@ namespace ResourceModLoader
                 var infos = (File.ReadAllText(Path.Combine(basePath, "rml.info")) + "\n\n").Split("\n");
                 tVer = infos[1];
                 lastInstall = infos[2];
-                string[] curVer = Program.VERSION.Split(".");
-                string[] installedVer = tVer.Split(".");
-                result = 0;
-                for (int i = 0; i < curVer.Length + 1 && i < installedVer.Length + 1; i++)
-                {
-                    if (i == curVer.Length || i == installedVer.Length) break;
-                    if (int.Parse(curVer[i]) == int.Parse(installedVer[i])) continue;
-                    if (int.Parse(curVer[i]) < int.Parse(installedVer[i]))
-                        result = -1;
-                    else
-                        result = 1;
-                    break;
-                }
+                result = Util.versionCompare(Program.VERSION, tVer);
             }
             if (lastInstall != "" && !Path.Exists(Path.Combine(basePath, lastInstall)))
             {
@@ -272,6 +261,16 @@ namespace ResourceModLoader
                 try { priority = int.Parse(File.ReadAllText(Path.Combine(modPath, "priority.txt"))); } catch (Exception _) { }
             if (File.Exists(Path.Combine(modPath, "优先级.txt")))
                 try { priority = int.Parse(File.ReadAllText(Path.Combine(modPath, "优先级.txt"))); } catch (Exception _) { }
+            if(File.Exists(Path.Combine(modPath, "rmlver.txt")))
+            {
+                string v = File.ReadAllText(Path.Combine(modPath, "rmlver.txt")).Trim();
+                if(Util.versionCompare(Program.VERSION, v) < 0)
+                {
+                    Log.Warn($"{modPath}要求RML版本不低于{v}，当前版本是{Program.VERSION}");
+                    Report.Error(Path.Combine(modPath, "rmlver.txt"), $"{modPath}要求RML版本不低于{v}，当前版本是{Program.VERSION}");
+                    return;
+                }
+            }
 
             if (File.Exists(Path.Combine(modPath, "replace.txt")))
             {
@@ -346,10 +345,19 @@ namespace ResourceModLoader
                 {
                     var hashList = modContext.CollectHashList(bundleName);
 
+                    if (hashList != null)
+                    {
+                        var bundlePath = scan.GetBundleLocalPath(bundleName);
+                        if (bundlePath != "" && Path.Exists(bundlePath))
+                        {
+                            hashList.Add(Convert.ToHexString(MD5.HashData(File.ReadAllBytes(bundlePath))));
+                        }
+                    }
+
                     bool result = true;
                     List<Tuple<string, string, string>> conflicts = [];
 
-                    if (modRecord.requireReApply(bundleName, hashList))
+                    if (hashList==null || modRecord.requireReApply(bundleName, hashList))
                     {
                         (result, conflicts) = AB.MergeBundles(scan.GetBundleLocalPath(bundleName), toPatch, Path.Combine(basePath, "_generated", bundleName), (m, b, a, p, r) => modContext.PostPatch(bundleName, "", m, b, a, p, r),this.isDebugMode);
                     }
@@ -365,7 +373,8 @@ namespace ResourceModLoader
                         {
                             Report.Warning(i, $"在修补 {name} 时和 {c} 冲突");
                         }
-                        modRecord.setSourceHashList(bundleName, hashList,conflicts);
+                        if(hashList != null)
+                            modRecord.setSourceHashList(bundleName, hashList,conflicts);
                     }
                     else
                     {

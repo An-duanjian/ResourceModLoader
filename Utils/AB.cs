@@ -567,28 +567,38 @@ namespace ResourceModLoader.Utils
                         }
                         if (needCreate)
                         {
-                            var existing = asset.file.GetAssetInfo(incomingFile.PathId);
-                            if (existing == null)
+
+                            if (patched[ai].ContainsKey(incomingFile.PathId))
                             {
-                                result.Add(new Tuple<int, long, byte[], int?>(ai, incomingFile.PathId, buf2, incomingFile.TypeId));
-                                patched[ai][incomingFile.PathId] = toLoad;
-                                if (!isDebugMode)
-                                    Log.StepProgress($"Add {iName.AsString} -> {toLoad}", 0);
-                                else
-                                    Log.Debug($"Add {iName.AsString} -> {toLoad}");
-                            }
-                            else if (existing.TypeId == incomingFile.TypeId)
-                            {
-                                result.Add(new Tuple<int, long, byte[], int?>(ai, incomingFile.PathId, buf2, null));
-                                patched[ai][incomingFile.PathId] = toLoad;
+                                string name = incomingFile.PathId.ToString();
+                                conflictResults.Add(new Tuple<string, string, string>(iName.AsString, toLoad, patched[ai][incomingFile.PathId]));
                             }
                             else
                             {
-                                string name = incomingFile.PathId.ToString();
-                                var field = incomingManager.GetBaseField(incomingAsset, incomingFile);
-                                if (field != null && !field["m_Name"].IsDummy)
-                                    name = field["m_Name"].AsString;
-                                conflictResults.Add(new Tuple<string, string, string>(iName.AsString, toLoad, name));
+                                var existing = asset.file.GetAssetInfo(incomingFile.PathId);
+
+                                if (existing == null)
+                                {
+                                    result.Add(new Tuple<int, long, byte[], int?>(ai, incomingFile.PathId, buf2, incomingFile.TypeId));
+                                    patched[ai][incomingFile.PathId] = toLoad;
+                                    if (!isDebugMode)
+                                        Log.StepProgress($"Add {iName.AsString} -> {toLoad}", 0);
+                                    else
+                                        Log.Debug($"Add {iName.AsString} -> {toLoad}");
+                                }
+                                else if (existing.TypeId == incomingFile.TypeId)
+                                {
+                                    result.Add(new Tuple<int, long, byte[], int?>(ai, incomingFile.PathId, buf2, null));
+                                    patched[ai][incomingFile.PathId] = toLoad;
+                                }
+                                else
+                                {
+                                    string name = incomingFile.PathId.ToString();
+                                    var field = incomingManager.GetBaseField(incomingAsset, incomingFile);
+                                    if (field != null && !field["m_Name"].IsDummy)
+                                        name = field["m_Name"].AsString;
+                                    conflictResults.Add(new Tuple<string, string, string>(iName.AsString, toLoad, name));
+                                }
                             }
                         }
                     }

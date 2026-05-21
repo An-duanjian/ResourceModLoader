@@ -108,7 +108,7 @@ namespace ResourceModLoader.Mod.Item
                 }
             }
         }
-        public override List<string> getHashes(string name)
+        public override List<string>? getHashes(string name)
         {
             if (name == bundleName)
                 return [Convert.ToHexString(MD5.HashData(File.ReadAllBytes(source)))];

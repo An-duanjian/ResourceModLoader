@@ -2,9 +2,12 @@
 using ResourceModLoader.Module;
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
+using static ResourceModLoader.Mod.Item.ModJsonItem;
 
 namespace ResourceModLoader.Mod.Item
 {
@@ -52,6 +55,16 @@ namespace ResourceModLoader.Mod.Item
                     bundles.Add(bundleFile);
             }
             return bundles;
+        }
+        public override List<string>? getHashes(string name)
+        {
+            List<string> results = new List<string>();
+            foreach (var (n, bundleFile, _, _) in redirections)
+            {
+                if (name == n && File.Exists(bundleFile))
+                    results.Add(Convert.ToHexString(MD5.HashData(File.ReadAllBytes(bundleFile))));
+            }
+            return results;
         }
     }
 }

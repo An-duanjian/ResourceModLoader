@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
 using static System.Net.Mime.MediaTypeNames;
@@ -79,6 +80,13 @@ namespace ResourceModLoader.Mod.Item
                 context.Redirect(name, path, this.container, "",true);
             else
                 context.NewItem(name, path, this.container, refName, true);
+        }
+
+        public override List<string>? getHashes(string name)
+        {
+            if (File.Exists(source))
+                return [Convert.ToHexString(MD5.HashData(File.ReadAllBytes(source)))];
+            return [];
         }
     }
 }

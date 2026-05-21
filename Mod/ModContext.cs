@@ -101,7 +101,9 @@ namespace ResourceModLoader.Mod
             List<string> results = new List<string>();
             foreach (IModItem modItem in modItems)
             {
-                results.AddRange(modItem.getHashes(name));
+                var res = modItem.getHashes(name);
+                if (res == null) return null;
+                results.AddRange(res);
             }
             return results;
         }

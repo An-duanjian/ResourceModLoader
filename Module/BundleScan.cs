@@ -21,8 +21,9 @@ namespace ResourceModLoader.Module
         string cache;
         private ModRecords modRecords;
         bool hasBuiltFileContainer = false;
-        List<Tuple<string, string>> bundleFiles = new List<Tuple<string, string>>();
+        List<Tuple<string, string, int>> bundleFiles = new List<Tuple<string, string, int>>();
         List<string> bundleFilesNames = new List<string>();
+        Dictionary<string, int> bundleCatalogIndex = new Dictionary<string, int>();
         Dictionary<string, List<Tuple<string, string>>> bundleFileNameContainerList = new Dictionary<string, List<Tuple<string, string>>>();
         public BundleScan(AddressableMgr ccd,ModRecords modRecords, string local, string cache)
         {
@@ -30,13 +31,14 @@ namespace ResourceModLoader.Module
             this.local = local;
             this.cache = cache;
             this.modRecords = modRecords;
-            foreach(var f in ccd.GetAllBundles())
+            foreach(var f in ccd.GetAllBundlesWithCatalog())
             {
                 if(!Path.Exists(GetBundleLocalPath(f.Item1)))
                 { continue; }
                 this.bundleFiles.Add(f);
+                this.bundleCatalogIndex[f.Item1] = f.Item3;
             }
-            foreach(var (ff,_) in bundleFiles)
+            foreach(var (ff,_,_) in bundleFiles)
             {
                 bundleFilesNames.Add(ff);
             }
@@ -46,7 +48,7 @@ namespace ResourceModLoader.Module
             if (hasBuiltFileContainer) return;
             Log.Warn("正在建立更加完善的索引来辅助匹配未知的文件。这可能会花费更多时间");
             Log.SetupProgress(bundleFiles.Count);
-            foreach (var (ff,fn) in bundleFiles)
+            foreach (var (ff,fn,_) in bundleFiles)
             {
                 if (DEBUG_CT != "" && ff != DEBUG_CT) continue;
                 Log.StepProgress(ff);
@@ -62,7 +64,7 @@ namespace ResourceModLoader.Module
         {
             return bundleFilesNames;
         }
-        public Tuple<string, List<Tuple<string, string>>> CalculateToReplaceItems(string bundlePath)
+        public Tuple<string, List<Tuple<string, string>>> CalculateToReplaceItems(string bundlePath,string ?preferBundleName = null)
         {
             AssetsManager manager = new AssetsManager();
             List<Tuple<string, string>> results = new List<Tuple<string, string>>();
@@ -76,6 +78,17 @@ namespace ResourceModLoader.Module
             var fab = manager.GetBaseField(asset, abdef);
             string oBundleName = fab["m_Name"].AsString;
             string bundleName = FindBundleFileName(oBundleName);
+            if (preferBundleName != null)
+            {
+                bundleName = preferBundleName;
+            }
+            Tuple<AssetsManager, AssetsFileInstance>? targetAssetInfo = null;
+            if(bundleName != "")
+            {
+                targetAssetInfo = GetBundle(bundleName);
+                if (targetAssetInfo == null)
+                    bundleName = "";
+            }
             if (bundleName == "")
             {
                 bundleName = modRecords.getMappedBundle(oBundleName);
@@ -84,9 +97,10 @@ namespace ResourceModLoader.Module
                     Log.Info($"Bundle {oBundleName} 被识别为 {bundleName} ");
                     Report.Warning(bundlePath, $"当前文件被识别为 {bundleName}，这不总是正确");
                 }
+
+                targetAssetInfo = GetBundle(bundleName);
             }
 
-            var targetAssetInfo = GetBundle(bundleName);
             if (targetAssetInfo == null)
             {
                 var matchedBundle = MatchForKnownBundleByFileContainer(manager, asset);
@@ -280,7 +294,7 @@ namespace ResourceModLoader.Module
         public string FindBundleFileName(string bundleMetaName)
         {
             string tfn = Path.GetFileNameWithoutExtension(bundleMetaName);
-            foreach (var (ff,fn) in bundleFiles)
+            foreach (var (ff,fn,_) in bundleFiles)
             {
                 if (fn == tfn)
                     return ff;
@@ -304,6 +318,21 @@ namespace ResourceModLoader.Module
         {
             InitFileNameContainerList();
             return bundleFileNameContainerList;
+        }
+        public List<Tuple<string, List<Tuple<string, string>>, int>> GetAllBundleContainerNameWithCatalog()
+        {
+            InitFileNameContainerList();
+            var results = new List<Tuple<string, List<Tuple<string, string>>, int>>();
+            foreach (var kvp in bundleFileNameContainerList)
+            {
+                int catIdx = bundleCatalogIndex.TryGetValue(kvp.Key, out int idx) ? idx : -1;
+                results.Add(new Tuple<string, List<Tuple<string, string>>, int>(kvp.Key, kvp.Value, catIdx));
+            }
+            return results;
+        }
+        public int GetBundleCatalogIndex(string filePath)
+        {
+            return bundleCatalogIndex.TryGetValue(filePath, out int idx) ? idx : -1;
         }
         public string GetBundleLocalPath(string bundleName)
         {
