@@ -5,6 +5,7 @@ using AssetsTools.NET.Texture;
 using System.Drawing;
 using System.Drawing.Imaging;
 using static ResourceModLoader.Mod.Item.ModJsonItem;
+using ResourceModLoader.Module;
 
 namespace ResourceModLoader.Utils
 {
@@ -324,7 +325,7 @@ namespace ResourceModLoader.Utils
             }
         }
 
-        public static Tuple<bool, List<Tuple<string, string, string>>> MergeBundles(string originalPath, List<string> bundles, string save, Action<AssetsManager, BundleFileInstance, AssetsFileInstance[], Dictionary<long, string>[], List<List<Tuple<int, long, byte[], int?>>>>? post = null,bool isDebugMode = false)
+        public static Tuple<bool, List<Tuple<string, string, string>>> MergeBundles(string originalPath, List<string> bundles, string save, Action<AssetsManager, BundleFileInstance, AssetsFileInstance[], Dictionary<long, string>[], List<List<Tuple<int, long>>>>? post = null,bool isDebugMode = false)
         {
             Log.Debug("开始修补" + originalPath);
             List<Tuple<string, string, string>> conflictResults = new List<Tuple<string, string, string>>();
@@ -374,7 +375,7 @@ namespace ResourceModLoader.Utils
                 resSRec = new ResSRec(){bytes=new List<byte[]> { iBytes }, len = iLength, name = $"archive:/{name0}/{inBundleFileNames[i]}" };
                 break;
             }
-            List<List<Tuple<int, long, byte[], int?>>> patches = new List<List<Tuple<int, long, byte[], int?>>>();
+            List<List<Tuple<int, long>>> patches = new List<List<Tuple<int, long>>>();
             foreach (string file in bundles)
             {
                 Log.StepProgress(file, 1);
@@ -399,36 +400,13 @@ namespace ResourceModLoader.Utils
 
             Log.FinalizeProgress();
 
+            var modifiedIndices = new HashSet<int>();
             foreach (var pl in patches)
-            {
-                foreach(var (ai,fi,p,type) in pl)
-                {
-                    if (type == null)
-                        assets[ai].file.GetAssetInfo(fi).Replacer = new ContentReplacerFromBuffer(p);
-                    else
-                    {
-                        var asif = AssetFileInfo.Create(assets[ai].file, fi, (int)type);
-                        if (asif != null)
-                        {
-                            asif.Replacer = new ContentReplacerFromBuffer(p);
-                            assets[ai].file.Metadata.AddAssetInfo(asif);
-                        }
-                    }
-                }
-            }
+                foreach (var (ai, _) in pl)
+                    modifiedIndices.Add(ai);
 
-            MemoryStream[] streams = new MemoryStream[assets.Count()];
-            for (int i = 0; i < assets.Count(); i++)
-                if (assets[i] != null)
-                {
-                    streams[i] = new MemoryStream();
-                    AssetsFileWriter w = new AssetsFileWriter(streams[i]);
-                    assets[i].file.Write(w);
-                }
-
-            for (int i = 0; i < assets.Count(); i++)
-                if (streams[i] != null)
-                    bundle.file.BlockAndDirInfo.DirectoryInfos[i].Replacer = new ContentReplacerFromStream(streams[i]);
+            foreach (var i in modifiedIndices)
+                bundle.file.BlockAndDirInfo.DirectoryInfos[i].SetNewData(assets[i].file);
 
             using (FileStream fsw = File.OpenWrite(save + ".preload"))
             {
@@ -459,9 +437,9 @@ namespace ResourceModLoader.Utils
             }
             return new Tuple<bool,List<Tuple<string,string,string>>>(result, conflictResults);
         }
-        private static List<Tuple<int,long, byte[], int?>>? PatchBundle(AssetsManager manager,BundleFileInstance bundleFileInst, AssetsFileInstance[] assets, string toLoad, Dictionary<long,string>[] patched,ResSRec? resS, string cacheFile,List<Tuple<string, string,string>> conflictResults, bool isDebugMode)
+        private static List<Tuple<int, long>>? PatchBundle(AssetsManager manager,BundleFileInstance bundleFileInst, AssetsFileInstance[] assets, string toLoad, Dictionary<long,string>[] patched,ResSRec? resS, string cacheFile,List<Tuple<string, string,string>> conflictResults, bool isDebugMode)
         {
-            List<Tuple<int,long, byte[], int?>> result = new List<Tuple<int,long, byte[],int?>>();
+            List<Tuple<int, long>> result = new List<Tuple<int, long>>();
             AssetsManager incomingManager = new AssetsManager();
             BundleFileInstance incomingBundle = incomingManager.LoadBundleFile(toLoad, false);
 
@@ -485,9 +463,7 @@ namespace ResourceModLoader.Utils
             for (int i = 0; i < incomingBundle.file.BlockAndDirInfo.DirectoryInfos.Count; i++)
             {
                 if (incomingBundle.file.IsAssetsFile(i)) continue;
-                //to patch资产有resS，但是现在的没有，这种情况下合并很复杂，暂时不处理
                 if (resS == null) return null;
-                //有多个resS，也暂时不处理
                 if (found) return null;
                 incomingBundle.file.GetFileRange(i, out long iStart, out long iLength);
                 incomingBundle.file.DataReader.Position = iStart;
@@ -496,10 +472,8 @@ namespace ResourceModLoader.Utils
                 resS.len += iLength;
                 found = true;
             }
-            //topatch没有ress，但是现在的有，这情况直接加一个空的进去占位就可以了
             if (!found && resS != null)
                 resS.bytes.Add([]);
-            List<(int fileId,long pathId, byte[] buf)> toCopyList = new List<(int fileId, long pathId, byte[] buf)> ();
             for (int i = 0; i < incomingBundle.file.BlockAndDirInfo.DirectoryInfos.Count; i++)
             {
                 AssetsFileInstance incomingAsset = incomingManager.LoadAssetsFileFromBundle(incomingBundle, i);
@@ -517,59 +491,49 @@ namespace ResourceModLoader.Utils
                     foreach (var incomingFile in incomingAssetsFile.AssetInfos)
                     {
                         if (incomingFile.TypeId == (int)AssetClassID.AssetBundle) continue;
-                        var iField = incomingManager.GetBaseField(incomingAsset, incomingFile);
+                        FieldTree iField = incomingManager.GetBaseField(incomingAsset, incomingFile);
                         var iName = iField["m_Name"];
                         if (iName.IsDummy) continue;
-
-                        long v2Start = incomingFile.GetAbsoluteByteOffset(incomingAssetsFile);
-                        long v2Size = incomingFile.ByteSize;
-                        incomingAssetsFile.Reader.Position = (int)v2Start;
-                        var buf2 = incomingAssetsFile.Reader.ReadBytes((int)v2Size);
 
                         bool needCreate = true;
                         foreach (var file in asset.file.AssetInfos)
                         {
-                            var oField = manager.GetBaseField(asset, file);
+                            FieldTree oField = manager.GetBaseField(asset, file);
                             var oName = oField["m_Name"];
                             if (oName.IsDummy) continue;
-                            if (!incomingContainers.ContainsKey(incomingFile.PathId) || !originalContainers.ContainsKey(file.PathId) || incomingContainers[incomingFile.PathId] != originalContainers[file.PathId])
+                            //container不同，且path不同的，直接跳过
+                            if (
+                                (!incomingContainers.ContainsKey(incomingFile.PathId) || !originalContainers.ContainsKey(file.PathId) || incomingContainers[incomingFile.PathId] != originalContainers[file.PathId])
+                                &&
+                                incomingFile.PathId != file.PathId
+                            )
                                 continue;
 
+                            //名称匹配
                             if (iName.AsString != oName.AsString)
                                 continue;
 
-                            long v1Start = file.GetAbsoluteByteOffset(asset.file);
-                            long v1Size = file.ByteSize;
-                            asset.file.Reader.Position = (int)v1Start;
-                            var buf1 = asset.file.Reader.ReadBytes((int)v1Size);
-
-                            if (!buf1.Equals(buf2))
+                            var diffs = FieldTree.Compare(iField, oField);
+                            if (diffs.Count > 0)
                             {
-
                                 if (patched[ai].ContainsKey(file.PathId))
                                 {
                                     conflictResults.Add(new Tuple<string, string, string>(iName.AsString, toLoad, patched[ai][file.PathId]));
                                     continue;
                                 }
-                                result.Add(new Tuple<int, long, byte[], int?>(ai, file.PathId, buf2, null));
-                                if (file.PathId == incomingFile.PathId)
-                                {
-                                    needCreate = false;
-                                    patched[ai][file.PathId] = toLoad;
-                                }
+                                FieldTree.CopyValues(iField, oField);
+                                file.SetNewData(oField.Root);
+                                result.Add(new Tuple<int, long>(ai, file.PathId));
+                                patched[ai][file.PathId] = toLoad;
                                 if (!isDebugMode)
                                     Log.StepProgress($"Patched {iName.AsString} -> {toLoad}", 0);
                                 else
                                     Log.Debug($"Patched {iName.AsString} -> {toLoad}");
                             }
-                            else
-                            {
-                                needCreate = false;
-                            }
+                            needCreate = false;
                         }
                         if (needCreate)
                         {
-
                             if (patched[ai].ContainsKey(incomingFile.PathId))
                             {
                                 string name = incomingFile.PathId.ToString();
@@ -581,16 +545,36 @@ namespace ResourceModLoader.Utils
 
                                 if (existing == null)
                                 {
-                                    result.Add(new Tuple<int, long, byte[], int?>(ai, incomingFile.PathId, buf2, incomingFile.TypeId));
-                                    patched[ai][incomingFile.PathId] = toLoad;
-                                    if (!isDebugMode)
-                                        Log.StepProgress($"Add {iName.AsString} -> {toLoad}", 0);
+                                    var scriptIndex = incomingFile.GetScriptIndex(incomingAssetsFile);
+                                    var incomingTypeTree = incomingAssetsFile.Metadata.FindTypeTreeTypeByScriptIndex(scriptIndex);
+
+                                    var localTypeTree = asset.file.Metadata.TypeTreeTypes
+                                        .FirstOrDefault(t => t.ScriptIdHash.Equals(incomingTypeTree.ScriptIdHash))
+                                        ?? asset.file.Metadata.TypeTreeTypes
+                                            .FirstOrDefault(t => t.TypeHash.Equals(incomingTypeTree.TypeHash));
+
+                                    var localScriptIndex = localTypeTree?.ScriptTypeIndex ?? scriptIndex;
+                                    var newInfo = AssetFileInfo.Create(asset.file, incomingFile.PathId, incomingFile.TypeId, localScriptIndex); 
+                                    if (newInfo != null)
+                                    {
+                                        newInfo.SetNewData(iField.Clone().Root);
+                                        asset.file.Metadata.AddAssetInfo(newInfo);
+                                        result.Add(new Tuple<int, long>(ai, incomingFile.PathId));
+                                        patched[ai][incomingFile.PathId] = toLoad;
+                                        if (!isDebugMode)
+                                            Log.StepProgress($"Add {iName.AsString} -> {toLoad}", 0);
+                                        else
+                                            Log.Debug($"Add {iName.AsString} -> {toLoad}");
+                                    }
                                     else
-                                        Log.Debug($"Add {iName.AsString} -> {toLoad}");
+                                    {
+                                        Log.Warn($"无法创建 {iName.AsString}@({incomingFile.PathId},{incomingFile.TypeId})");
+                                    }
                                 }
                                 else if (existing.TypeId == incomingFile.TypeId)
                                 {
-                                    result.Add(new Tuple<int, long, byte[], int?>(ai, incomingFile.PathId, buf2, null));
+                                    existing.SetNewData(iField.Clone().Root);
+                                    result.Add(new Tuple<int, long>(ai, incomingFile.PathId));
                                     patched[ai][incomingFile.PathId] = toLoad;
                                 }
                                 else
@@ -727,7 +711,7 @@ namespace ResourceModLoader.Utils
             }
         }
 
-        private static void ABMergeTransformStreamData(string save,ResSRec resSRec, List<List<Tuple<int, long, byte[],int?>>> patches,bool isDebug)
+        private static void ABMergeTransformStreamData(string save,ResSRec resSRec, List<List<Tuple<int, long>>> patches,bool isDebug)
         {
             using FileStream fsr = File.OpenRead(save + ".preload");
             AssetsManager manager = new AssetsManager();
@@ -736,7 +720,7 @@ namespace ResourceModLoader.Utils
             ulong offset = (ulong)resSRec.bytes[0].Length;
             for(int i = 0; i < patches.Count; i++)
             {
-                foreach (var (fileIdx, pathId, _,_) in patches[i])
+                foreach (var (fileIdx, pathId) in patches[i])
                 {
                     var asf = manager.LoadAssetsFileFromBundle(bundle, fileIdx);
                     var asif = asf.file.GetAssetInfo(pathId);

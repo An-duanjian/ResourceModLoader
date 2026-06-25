@@ -123,7 +123,7 @@ namespace ResourceModLoader.Mod.Item
         {
             return name == this.bundle || (addressableName == this.name && this.name != "");
         }
-        public override void PostPatch(string bundleName, string addressableName, AssetsManager manager, BundleFileInstance bundle, AssetsFileInstance[] assets, Dictionary<long, string>[] patched, List<List<Tuple<int, long, byte[], int?>>> patches)
+        public override void PostPatch(string bundleName, string addressableName, AssetsManager manager, BundleFileInstance bundle, AssetsFileInstance[] assets, Dictionary<long, string>[] patched, List<List<Tuple<int, long>>> patches)
         {
             if (ext == "" || (bundleName != this.bundle && addressableName != name)) return;
             foreach (var asset in assets)
