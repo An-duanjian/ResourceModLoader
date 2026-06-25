@@ -25,6 +25,7 @@ namespace ResourceModLoader.Module
         List<string> bundleFilesNames = new List<string>();
         Dictionary<string, int> bundleCatalogIndex = new Dictionary<string, int>();
         Dictionary<string, List<Tuple<string, string>>> bundleFileNameContainerList = new Dictionary<string, List<Tuple<string, string>>>();
+        Dictionary<string, List<Tuple<long, string>>> bundleFileNamePathList = new Dictionary<string, List<Tuple<long, string>>>();
         public BundleScan(AddressableMgr ccd,ModRecords modRecords, string local, string cache)
         {
             this.ccd = ccd;
@@ -53,9 +54,11 @@ namespace ResourceModLoader.Module
                 if (DEBUG_CT != "" && ff != DEBUG_CT) continue;
                 Log.StepProgress(ff);
                 var (manager,asset)= GetBundle(ff);
-                var fileContainers = GetFileContainerList(manager, asset);
-                if (fileContainers.Count > 0)
-                    bundleFileNameContainerList[ff] = fileContainers;
+                var fileContainers = GetFileContainerListAndPathList(manager, asset);
+                if (fileContainers.Item1.Count > 0)
+                    bundleFileNameContainerList[ff] = fileContainers.Item1;
+                if(fileContainers.Item2.Count > 0)
+                    bundleFileNamePathList[ff] = fileContainers.Item2;
             }
             Log.FinalizeProgress("索引完成");
             hasBuiltFileContainer = true;
@@ -120,23 +123,8 @@ namespace ResourceModLoader.Module
             }
             else
             {
-                Log.Warn($"{bundleName} 无法对应到游戏中任何一个资产文件，它可能是一个过期资产。将尝试加载并重定向所有文件，如果游戏异常，优先考虑删除这个文件");
-                Report.Warning(bundlePath, $"无法对应到游戏中任何一个资产文件，它可能是一个过期资产。将尝试加载并重定向所有文件，如果游戏异常，优先考虑删除这个文件");
-                bundleName = "UNK";
-                var container = AB.GetContainerDic(manager, asset);
-                foreach (var assetInfo in assetFile.AssetInfos)
-                {
-                    if (assetInfo.GetTypeId(assetFile) == (int)AssetClassID.AssetBundle)
-                        continue;
-                    var bf = manager.GetBaseField(asset, assetInfo);
-                    var nameObj = bf["m_Name"];
-                    if (nameObj.IsDummy)
-                        continue;
-                    var addressableKey = nameObj.AsString;
-                    if (addressableKey == null)
-                        continue;
-                    results.Add(new Tuple<string, string>(nameObj.AsString, container.GetValueOrDefault(assetInfo.PathId, "")));
-                }
+                Log.Error($"{bundleName} 无法对应到游戏中任何一个资产文件");
+                Report.Error(bundlePath ,$"{bundleName} 无法对应到游戏中任何一个资产文件");
             }
             if (hasUnAddressable || results.Count == 0)
             {
@@ -149,7 +137,7 @@ namespace ResourceModLoader.Module
         private string MatchForKnownBundleByFileContainer(AssetsManager manager, AssetsFileInstance asset)
         {
             InitFileNameContainerList();
-            var fileContainers = GetFileContainerList(manager, asset);
+            var (fileContainers,filePathes) = GetFileContainerListAndPathList(manager, asset);
             foreach (var bfcl in bundleFileNameContainerList)
             {
                 int i = 0;
@@ -164,6 +152,31 @@ namespace ResourceModLoader.Module
                     j++;
                 }
                 if (i == fileContainers.Count)
+                {
+                    return bfcl.Key;
+                }
+            }
+
+            foreach (var bfcl in bundleFileNamePathList)
+            {
+                int i = 0;
+                int j = 0;
+                int mc = 0;
+
+                while (i < filePathes.Count && j < bfcl.Value.Count)
+                {
+                    if (filePathes[i].Equals(bfcl.Value[j]))
+                    {
+                        i++;
+                        j++;
+                        mc++;
+                    }
+                    else if (filePathes[i].Item1 < bfcl.Value[j].Item1)
+                        i++;
+                    else
+                        j++;
+                }
+                if (mc > filePathes.Count / 4 && (mc > 2 || mc == filePathes.Count))
                 {
                     return bfcl.Key;
                 }
@@ -266,15 +279,21 @@ namespace ResourceModLoader.Module
         }
         public List<Tuple<string, string>> GetFileContainerList(AssetsManager manager, AssetsFileInstance asset)
         {
+            return GetFileContainerListAndPathList(manager, asset).Item1;
+        }
+        public (List<Tuple<string, string>>, List<Tuple<long, string>>) GetFileContainerListAndPathList(AssetsManager manager, AssetsFileInstance asset)
+        {
             var assetFile = asset.file;
             var abdef = assetFile.GetAssetsOfType(AssetClassID.AssetBundle).First();
             var fab = manager.GetBaseField(asset, abdef);
             List<Tuple<string, string>> fileContainers = new List<Tuple<string, string>>();
+            List<Tuple<long, string>> filePathes = new List<Tuple<long, string>>();
             HashSet<long> pathIds = new HashSet<long>();
             foreach (var containerDesc in fab["m_Container.Array"].Children)
             {
                 var ctr = containerDesc["first"];
-                var file = assetFile.GetAssetInfo(containerDesc["second"]["asset"]["m_PathID"].AsLong);
+                var path = containerDesc["second"]["asset"]["m_PathID"].AsLong;
+                var file = assetFile.GetAssetInfo(path);
                 if (file == null)
                 {
                     fileContainers.Clear();
@@ -284,12 +303,26 @@ namespace ResourceModLoader.Module
                 var nameField = manager.GetBaseField(asset, file)["m_Name"];
                 if (nameField.IsDummy) continue;
                 fileContainers.Add(new Tuple<string, string>(ctr.AsString, nameField.AsString));
+                filePathes.Add(new Tuple<long, string>(path, nameField.AsString));
+            }
+            foreach (var ai in asset.file.AssetInfos)
+            {
+                var path = ai.PathId;
+                if(pathIds.Contains(path)) continue;
+                pathIds.Add(path);
+                var nameField = manager.GetBaseField(asset, ai)["m_Name"];
+                if (nameField.IsDummy) continue;
+                filePathes.Add(new Tuple<long, string>(path, nameField.AsString));
             }
             if (fileContainers.Count > 0)
             {
                 fileContainers.Sort();
             }
-            return fileContainers;
+            if (filePathes.Count > 0)
+            {
+                filePathes.Sort();
+            }
+            return (fileContainers,filePathes);
         }
         public string FindBundleFileName(string bundleMetaName)
         {

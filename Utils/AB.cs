@@ -387,6 +387,7 @@ namespace ResourceModLoader.Utils
                     break;
                 }
                 patches.Add(r);
+                MergeAssetBundleContainers(manager, bundle, assets, file, save + ".temp1");
                 Log.Info($"从 {file} 提取和替换了共 {r.Count} 个文件");
             }
             if (!result) {
@@ -437,7 +438,7 @@ namespace ResourceModLoader.Utils
             bundle.file.Close();
 
             if (resSRec != null)
-                ABMergeTransformStreamData(save, resSRec, patches);
+                ABMergeTransformStreamData(save, resSRec, patches,isDebugMode);
             else
                 File.Move(save + ".preload", save + ".uncompressed");
 
@@ -515,6 +516,7 @@ namespace ResourceModLoader.Utils
 
                     foreach (var incomingFile in incomingAssetsFile.AssetInfos)
                     {
+                        if (incomingFile.TypeId == (int)AssetClassID.AssetBundle) continue;
                         var iField = incomingManager.GetBaseField(incomingAsset, incomingFile);
                         var iName = iField["m_Name"];
                         if (iName.IsDummy) continue;
@@ -612,7 +614,120 @@ namespace ResourceModLoader.Utils
             return result;
         }
 
-        private static void ABMergeTransformStreamData(string save,ResSRec resSRec, List<List<Tuple<int, long, byte[],int?>>> patches)
+        private static void MergeAssetBundleContainers(AssetsManager manager, BundleFileInstance bundle, AssetsFileInstance[] assets, string patchPath, string cacheFile)
+        {
+            AssetsManager patchManager = new AssetsManager();
+            BundleFileInstance patchBundle = patchManager.LoadBundleFile(patchPath, false);
+
+            string localTmp = "";
+            if (patchBundle.file.BlockAndDirInfo.DirectoryInfos.Find(t => t.DecompressedSize > 20 * 1024 * 1024) != null)
+            {
+                localTmp = cacheFile;
+                FileStream bundleStream = File.Open(localTmp, FileMode.Create);
+                patchBundle.file.Unpack(new AssetsFileWriter(bundleStream));
+                bundleStream.Close();
+                patchManager = new AssetsManager();
+                patchBundle = patchManager.LoadBundleFile(localTmp);
+            }
+            else
+            {
+                patchBundle = patchManager.LoadBundleFile(patchPath);
+            }
+
+            for (int pi = 0; pi < patchBundle.file.BlockAndDirInfo.DirectoryInfos.Count; pi++)
+            {
+                if (!patchBundle.file.IsAssetsFile(pi)) continue;
+                var patchAsset = patchManager.LoadAssetsFileFromBundle(patchBundle, pi);
+                if (patchAsset == null) continue;
+
+                var patchAbAssets = patchAsset.file.GetAssetsOfType(AssetClassID.AssetBundle);
+                if (patchAbAssets.Count == 0) continue;
+                var patchAbInfo = patchAbAssets[0];
+                var patchAbField = patchManager.GetBaseField(patchAsset, patchAbInfo);
+
+                var patchContainers = patchAbField["m_Container.Array"].Children;
+                var patchPreload = patchAbField["m_PreloadTable.Array"].Children;
+
+                var patchContainerNames = new HashSet<string>();
+                foreach (var c in patchContainers)
+                    patchContainerNames.Add(c["first"].AsString);
+
+                for (int ai = 0; ai < assets.Length; ai++)
+                {
+                    if (assets[ai] == null) continue;
+                    var origAbAssets = assets[ai].file.GetAssetsOfType(AssetClassID.AssetBundle);
+                    if (origAbAssets.Count == 0) continue;
+                    var origAbInfo = origAbAssets[0];
+                    var origAbField = manager.GetBaseField(assets[ai], origAbInfo);
+
+                    var origContainers = origAbField["m_Container.Array"].Children;
+
+                    bool matched = false;
+                    foreach (var c in origContainers)
+                    {
+                        if (patchContainerNames.Contains(c["first"].AsString))
+                        {
+                            matched = true;
+                            break;
+                        }
+                    }
+                    if (!matched) continue;
+
+                    var origContainerNames = new HashSet<string>();
+                    foreach (var c in origContainers)
+                        origContainerNames.Add(c["first"].AsString);
+
+                    var origPreload = origAbField["m_PreloadTable.Array"].Children;
+                    var origPreloadIds = new HashSet<long>();
+                    foreach (var p in origPreload)
+                        origPreloadIds.Add(p["m_PathID"].AsLong);
+
+                    bool modified = false;
+
+                    foreach (var pc in patchContainers)
+                    {
+                        var name = pc["first"].AsString;
+                        if (!origContainerNames.Contains(name))
+                        {
+                            var newContainer = new AssetTypeValueField();
+                            newContainer.TemplateField = pc.TemplateField;
+                            newContainer["first"].AsString = name;
+                            newContainer["second"]["asset"]["m_PathID"].AsLong = pc["second"]["asset"]["m_PathID"].AsLong;
+                            origContainers.Add(newContainer);
+                            modified = true;
+                        }
+                    }
+
+                    foreach (var pp in patchPreload)
+                    {
+                        var pathId = pp["m_PathID"].AsLong;
+                        if (!origPreloadIds.Contains(pathId))
+                        {
+                            var newPreload = new AssetTypeValueField();
+                            newPreload.TemplateField = pp.TemplateField;
+                            newPreload["m_PathID"].AsLong = pathId;
+                            origPreload.Add(newPreload);
+                            modified = true;
+                        }
+                    }
+
+                    if (modified)
+                    {
+                        origAbInfo.SetNewData(origAbField);
+                        bundle.file.BlockAndDirInfo.DirectoryInfos[ai].SetNewData(assets[ai].file);
+                    }
+                    break;
+                }
+            }
+
+            if (localTmp != "")
+            {
+                patchBundle.file.Close();
+                File.Delete(localTmp);
+            }
+        }
+
+        private static void ABMergeTransformStreamData(string save,ResSRec resSRec, List<List<Tuple<int, long, byte[],int?>>> patches,bool isDebug)
         {
             using FileStream fsr = File.OpenRead(save + ".preload");
             AssetsManager manager = new AssetsManager();
@@ -626,15 +741,24 @@ namespace ResourceModLoader.Utils
                     var asf = manager.LoadAssetsFileFromBundle(bundle, fileIdx);
                     var asif = asf.file.GetAssetInfo(pathId);
                     if (asif == null) continue;
-                    var field = manager.GetBaseField(asf, asif);
-                    if (field["m_StreamData"].IsDummy) continue;
-                    if (field["m_StreamData"]["size"].AsULong == 0) continue;
-                    field["m_StreamData"]["path"].AsString = resSRec.name;
-                    field["m_StreamData"]["offset"].AsULong += offset;
-                    if (!field["m_Name"].IsDummy)
-                        Log.StepProgress("更新Streaming "+ field["m_Name"].AsString, 0);
-                    asif.SetNewData(field);
-                    bundle.file.BlockAndDirInfo.DirectoryInfos[fileIdx].SetNewData(asf.file);
+                    try
+                    {
+                        var field = manager.GetBaseField(asf, asif);
+                        if (field["m_StreamData"].IsDummy) continue;
+                        if (field["m_StreamData"]["size"].AsULong == 0) continue;
+                        field["m_StreamData"]["path"].AsString = resSRec.name;
+                        field["m_StreamData"]["offset"].AsULong += offset;
+                        if (!field["m_Name"].IsDummy)
+                            Log.StepProgress("更新Streaming " + field["m_Name"].AsString, 0);
+                        asif.SetNewData(field);
+                        bundle.file.BlockAndDirInfo.DirectoryInfos[fileIdx].SetNewData(asf.file);
+                    }
+                    catch(Exception e){
+                        if (isDebug)
+                        {
+                            Log.Warn($"处理{pathId}时发生异常："+e.ToString());
+                        }
+                    }
                 }
 
                 offset += (ulong) resSRec.bytes[i + 1].Length;
