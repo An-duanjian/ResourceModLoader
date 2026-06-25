@@ -5,7 +5,7 @@ using System.Linq;
 
 namespace ResourceModLoader.Utils
 {
-    public class FieldTree
+    public readonly struct FieldTree
     {
         private readonly AssetTypeValueField _field;
 
@@ -67,16 +67,16 @@ namespace ResourceModLoader.Utils
 
         public static void CopyValues(FieldTree source, FieldTree target)
         {
-            CopyValuesInternal(source, target);
+            CopyValuesInternal(source._field, target._field);
         }
 
-        private static void CopyValuesInternal(FieldTree source, FieldTree target)
+        private static void CopyValuesInternal(AssetTypeValueField source, AssetTypeValueField target)
         {
             if (source.IsDummy || target.IsDummy)
                 return;
 
-            var sChildren = source._field.Children;
-            var tChildren = target._field.Children;
+            var sChildren = source.Children;
+            var tChildren = target.Children;
             bool sHasChildren = sChildren != null && sChildren.Count > 0;
             bool tHasChildren = tChildren != null && tChildren.Count > 0;
 
@@ -84,34 +84,31 @@ namespace ResourceModLoader.Utils
             {
                 int count = Math.Min(sChildren!.Count, tChildren!.Count);
                 for (int i = 0; i < count; i++)
-                    CopyValuesInternal(new FieldTree(sChildren[i]), new FieldTree(tChildren[i]));
+                    CopyValuesInternal(sChildren[i], tChildren[i]);
             }
             else if (!sHasChildren && !tHasChildren)
             {
-                target._field.Value = source._field.Value.Clone();
+                target.Value = source.Value.Clone();
             }
         }
 
-        public static List<string> Compare(FieldTree a, FieldTree b, string basePath = "")
+        public static bool IsSame(FieldTree a, FieldTree b)
         {
-            var diffs = new List<string>();
-            CompareInternal(a, b, basePath, diffs);
-            return diffs;
+            return CompareInternal(a._field, b._field);
         }
 
-        private static void CompareInternal(FieldTree a, FieldTree b, string path, List<string> diffs)
+        private static bool CompareInternal(AssetTypeValueField a, AssetTypeValueField b)
         {
             if (a.IsDummy && b.IsDummy)
-                return;
+                return true;
 
             if (a.IsDummy || b.IsDummy)
             {
-                diffs.Add(path);
-                return;
+                return false;
             }
 
-            var aChildren = a._field.Children;
-            var bChildren = b._field.Children;
+            var aChildren = a.Children;
+            var bChildren = b.Children;
             bool aHasChildren = aChildren != null && aChildren.Count > 0;
             bool bHasChildren = bChildren != null && bChildren.Count > 0;
 
@@ -119,46 +116,38 @@ namespace ResourceModLoader.Utils
             {
                 if (aChildren!.Count != bChildren!.Count)
                 {
-                    diffs.Add(path);
-                    return;
+                    return false;
                 }
 
                 for (int i = 0; i < aChildren.Count; i++)
                 {
                     var childA = aChildren[i];
                     var childB = bChildren[i];
-                    var childName = childA.TemplateField?.Name;
-                    string childPath;
-                    if (childName != null)
-                        childPath = string.IsNullOrEmpty(path) ? childName : $"{path}.{childName}";
-                    else
-                        childPath = string.IsNullOrEmpty(path) ? $"[{i}]" : $"{path}[{i}]";
-                    CompareInternal(new FieldTree(childA), new FieldTree(childB), childPath, diffs);
+                    if(!CompareInternal(childA, childB))
+                        return false;
                 }
+                return true;
             }
             else if (!aHasChildren && !bHasChildren)
             {
-                if(a._field.Value == null && b._field.Value == null)
+                if (a.Value == null && b.Value == null)
+                    return true;
+                if (a.Value == null || b.Value == null)
                 {
-                    return;
+                    return false;
                 }
-                if (a._field.Value == null || b._field.Value == null)
+                if (a.Value.ValueType != b.Value.ValueType)
                 {
-                    diffs.Add(path);
-                    return;
-                }
-                if (a._field.Value.ValueType != b._field.Value.ValueType)
-                {
-                    diffs.Add(path);
-                    return;
+                    return false;
                 }
 
-                if (!ValuesEqual(a._field, b._field))
-                    diffs.Add(path);
+                if (!ValuesEqual(a, b)) 
+                    return false;
+                return true;
             }
             else
             {
-                diffs.Add(path);
+                return false;
             }
         }
 

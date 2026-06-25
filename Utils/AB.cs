@@ -513,8 +513,7 @@ namespace ResourceModLoader.Utils
                             if (iName.AsString != oName.AsString)
                                 continue;
 
-                            var diffs = FieldTree.Compare(iField, oField);
-                            if (diffs.Count > 0)
+                            if (!FieldTree.IsSame(iField, oField))
                             {
                                 if (patched[ai].ContainsKey(file.PathId))
                                 {
@@ -552,6 +551,11 @@ namespace ResourceModLoader.Utils
                                         .FirstOrDefault(t => t.ScriptIdHash.Equals(incomingTypeTree.ScriptIdHash))
                                         ?? asset.file.Metadata.TypeTreeTypes
                                             .FirstOrDefault(t => t.TypeHash.Equals(incomingTypeTree.TypeHash));
+                                    if(localTypeTree == null)
+                                    {
+                                        localTypeTree = TypeUtil.CloneTypeTree(incomingTypeTree);
+                                        asset.file.Metadata.TypeTreeTypes.Add(localTypeTree);
+                                    }
 
                                     var localScriptIndex = localTypeTree?.ScriptTypeIndex ?? scriptIndex;
                                     var newInfo = AssetFileInfo.Create(asset.file, incomingFile.PathId, incomingFile.TypeId, localScriptIndex); 
