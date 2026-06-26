@@ -1,6 +1,7 @@
 ﻿using AssetsTools.NET.Extra;
 using ResourceModLoader.Mod.Patch;
 using ResourceModLoader.Module;
+using ResourceModLoader.Utils;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -123,7 +124,7 @@ namespace ResourceModLoader.Mod.Item
         {
             return name == this.bundle || (addressableName == this.name && this.name != "");
         }
-        public override void PostPatch(string bundleName, string addressableName, AssetsManager manager, BundleFileInstance bundle, AssetsFileInstance[] assets, Dictionary<long, string>[] patched, List<List<Tuple<int, long>>> patches)
+        public override void PostPatch(string bundleName, string addressableName, AssetsManager manager, BundleFileInstance bundle, AssetsFileInstance[] assets, Dictionary<long, string>[] patched, List<List<PatchEntry>> patches)
         {
             if (ext == "" || (bundleName != this.bundle && addressableName != name)) return;
             foreach (var asset in assets)

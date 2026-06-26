@@ -82,9 +82,18 @@ namespace ResourceModLoader.Utils
 
             if (sHasChildren && tHasChildren)
             {
-                int count = Math.Min(sChildren!.Count, tChildren!.Count);
-                for (int i = 0; i < count; i++)
-                    CopyValuesInternal(sChildren[i], tChildren[i]);
+                for(int i = 0; i < sChildren!.Count; i++)
+                {
+                    string fieldName = sChildren[i].FieldName;
+                    for(int j = 0; j < tChildren!.Count; j++)
+                    {
+                        if (tChildren[j].FieldName == fieldName)
+                        {
+                            CopyValuesInternal(sChildren[i], tChildren[j]);
+                            break;
+                        }
+                    }
+                }
             }
             else if (!sHasChildren && !tHasChildren)
             {
