@@ -520,8 +520,7 @@ namespace ResourceModLoader.Utils
                                     conflictResults.Add(new Tuple<string, string, string>(iName.AsString, toLoad, patched[ai][file.PathId]));
                                     continue;
                                 }
-                                FieldTree.CopyValues(iField, oField);
-                                file.SetNewData(oField.Root);
+                                CopyTreeData(incomingFile, incomingAssetsFile, file);
                                 result.Add(new Tuple<int, long>(ai, file.PathId));
                                 patched[ai][file.PathId] = toLoad;
                                 if (!isDebugMode)
@@ -551,33 +550,38 @@ namespace ResourceModLoader.Utils
                                         .FirstOrDefault(t => t.ScriptIdHash.Equals(incomingTypeTree.ScriptIdHash))
                                         ?? asset.file.Metadata.TypeTreeTypes
                                             .FirstOrDefault(t => t.TypeHash.Equals(incomingTypeTree.TypeHash));
-                                    if(localTypeTree == null)
+                                    // type匹配失败，则不强求将数据复制过去，抛出错误后结束
+                                    if (localTypeTree != null)
                                     {
-                                        localTypeTree = TypeUtil.CloneTypeTree(incomingTypeTree);
-                                        asset.file.Metadata.TypeTreeTypes.Add(localTypeTree);
-                                    }
-
-                                    var localScriptIndex = localTypeTree?.ScriptTypeIndex ?? scriptIndex;
-                                    var newInfo = AssetFileInfo.Create(asset.file, incomingFile.PathId, incomingFile.TypeId, localScriptIndex); 
-                                    if (newInfo != null)
-                                    {
-                                        newInfo.SetNewData(iField.Clone().Root);
-                                        asset.file.Metadata.AddAssetInfo(newInfo);
-                                        result.Add(new Tuple<int, long>(ai, incomingFile.PathId));
-                                        patched[ai][incomingFile.PathId] = toLoad;
-                                        if (!isDebugMode)
-                                            Log.StepProgress($"Add {iName.AsString} -> {toLoad}", 0);
+                                        var localScriptIndex = localTypeTree.ScriptTypeIndex;
+                                        var newInfo = AssetFileInfo.Create(asset.file, incomingFile.PathId, incomingFile.TypeId, localScriptIndex);
+                                        if (newInfo != null)
+                                        {
+                                            CopyTreeData(incomingFile, incomingAssetsFile, newInfo);
+                                            asset.file.Metadata.AddAssetInfo(newInfo);
+                                            result.Add(new Tuple<int, long>(ai, incomingFile.PathId));
+                                            patched[ai][incomingFile.PathId] = toLoad;
+                                            if (!isDebugMode)
+                                                Log.StepProgress($"Add {iName.AsString} -> {toLoad}", 0);
+                                            else
+                                                Log.Debug($"Add {iName.AsString} -> {toLoad}");
+                                        }
                                         else
-                                            Log.Debug($"Add {iName.AsString} -> {toLoad}");
+                                        {
+                                            Log.Warn($"无法创建 {iName.AsString}@({incomingFile.PathId},{incomingFile.TypeId})");
+                                            Report.Warning(toLoad, $"无法创建 {iName.AsString}@({incomingFile.PathId},{incomingFile.TypeId})");
+                                        }
+
                                     }
                                     else
                                     {
-                                        Log.Warn($"无法创建 {iName.AsString}@({incomingFile.PathId},{incomingFile.TypeId})");
+                                        Log.Warn($"Type不存在 {iName.AsString}@({incomingFile.PathId},{incomingFile.TypeId},{scriptIndex})");
+                                        Report.Warning(toLoad, $"Type不存在 {iName.AsString}@({incomingFile.PathId},{incomingFile.TypeId},{scriptIndex})");
                                     }
                                 }
                                 else if (existing.TypeId == incomingFile.TypeId)
                                 {
-                                    existing.SetNewData(iField.Clone().Root);
+                                    CopyTreeData(incomingFile, incomingAssetsFile, existing);
                                     result.Add(new Tuple<int, long>(ai, incomingFile.PathId));
                                     patched[ai][incomingFile.PathId] = toLoad;
                                 }
@@ -600,6 +604,15 @@ namespace ResourceModLoader.Utils
                 File.Delete(localTmp);
             }
             return result;
+        }
+
+        private static void CopyTreeData(AssetFileInfo incomingFile,AssetsFile incomingAssetsFile,AssetFileInfo target)
+        {
+            long v2Start = incomingFile.GetAbsoluteByteOffset(incomingAssetsFile);
+            long v2Size = incomingFile.ByteSize;
+            incomingAssetsFile.Reader.Position = (int)v2Start;
+            var buf2 = incomingAssetsFile.Reader.ReadBytes((int)v2Size);
+            target.SetNewData(buf2);
         }
 
         private static void MergeAssetBundleContainers(AssetsManager manager, BundleFileInstance bundle, AssetsFileInstance[] assets, string patchPath, string cacheFile)
@@ -749,7 +762,7 @@ namespace ResourceModLoader.Utils
                     }
                 }
 
-                offset += (ulong) resSRec.bytes[i + 1].Length;
+                offset += (ulong) resSRec.bytes[i].Length;
             }
             var ian = bundle.file.GetAllFileNames();
             Log.StepProgress("更新并写回ResS", 0);
