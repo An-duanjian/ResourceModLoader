@@ -38,7 +38,7 @@ namespace ResourceModLoader.Utils
     {
         public int FileIndex;
         public long PathId;
-        public byte[] Data;
+        public byte[]? Data;
         public int? TypeId;
         public ushort? ScriptIndex;
     }
@@ -411,6 +411,7 @@ namespace ResourceModLoader.Utils
             foreach (var pl in patches)
                 foreach (var entry in pl)
                 {
+                    if (entry.Data == null) continue;
                     if (entry.TypeId == null)
                         assets[entry.FileIndex].file.GetAssetInfo(entry.PathId).Replacer = new ContentReplacerFromBuffer(entry.Data);
                     else
@@ -572,6 +573,7 @@ namespace ResourceModLoader.Utils
                                     }
                                     FieldTree.CopyValues(iField, oField);
                                     file.SetNewData(oField.Root);
+                                    result.Add(new PatchEntry { FileIndex = ai, Data = null, PathId = file.PathId, ScriptIndex = 0, TypeId = 0 });
                                 }
                                 else { 
                                     result.Add(ReadPatchEntry(incomingFile, incomingAssetsFile, ai, file.PathId, null));
@@ -704,6 +706,9 @@ namespace ResourceModLoader.Utils
                 var patchAbInfo = patchAbAssets[0];
                 var patchAbField = patchManager.GetBaseField(patchAsset, patchAbInfo);
 
+                if (patchAbField["m_Container.Array"] == null || patchAbField["m_Container.Array"].IsDummy || patchAbField["m_PreloadTable.Array"] == null || patchAbField["m_PreloadTable.Array"].IsDummy)
+                    continue;
+
                 var patchContainers = patchAbField["m_Container.Array"].Children;
                 var patchPreload = patchAbField["m_PreloadTable.Array"].Children;
 
@@ -747,9 +752,8 @@ namespace ResourceModLoader.Utils
                     {
                         var name = pc["first"].AsString;
                         if (!origContainerNames.Contains(name))
-                        {
-                            var newContainer = new AssetTypeValueField();
-                            newContainer.TemplateField = pc.TemplateField;
+                        { 
+                            var newContainer = ValueBuilder.DefaultValueFieldFromTemplate(pc.TemplateField);
                             newContainer["first"].AsString = name;
                             newContainer["second"]["asset"]["m_PathID"].AsLong = pc["second"]["asset"]["m_PathID"].AsLong;
                             origContainers.Add(newContainer);
@@ -762,8 +766,7 @@ namespace ResourceModLoader.Utils
                         var pathId = pp["m_PathID"].AsLong;
                         if (!origPreloadIds.Contains(pathId))
                         {
-                            var newPreload = new AssetTypeValueField();
-                            newPreload.TemplateField = pp.TemplateField;
+                            var newPreload = ValueBuilder.DefaultValueFieldFromTemplate(pp.TemplateField);
                             newPreload["m_PathID"].AsLong = pathId;
                             origPreload.Add(newPreload);
                             modified = true;

@@ -162,21 +162,28 @@ namespace ResourceModLoader.Module
                 int i = 0;
                 int j = 0;
                 int mc = 0;
+                int pathMatch = 0;
 
                 while (i < filePathes.Count && j < bfcl.Value.Count)
                 {
                     if (filePathes[i].Equals(bfcl.Value[j]))
+                        mc++;
+                    if (filePathes[i].Item1.Equals(bfcl.Value[j].Item1))
                     {
                         i++;
                         j++;
-                        mc++;
+                        pathMatch++;
                     }
                     else if (filePathes[i].Item1 < bfcl.Value[j].Item1)
                         i++;
                     else
                         j++;
                 }
-                if (mc > filePathes.Count / 4 && (mc > 2 || mc == filePathes.Count))
+                if ((mc > filePathes.Count / 5 || mc > bfcl.Value.Count / 5) && (mc > 2 || mc == filePathes.Count))
+                {
+                    return bfcl.Key;
+                }
+                if ((pathMatch > filePathes.Count / 3 || pathMatch > bfcl.Value.Count / 3) && (pathMatch > 3 || pathMatch == filePathes.Count))
                 {
                     return bfcl.Key;
                 }
