@@ -6,6 +6,7 @@ using System.Drawing;
 using System.Drawing.Imaging;
 using static ResourceModLoader.Mod.Item.ModJsonItem;
 using ResourceModLoader.Module;
+using ResourceModLoader.Mod.SpecialProcess;
 
 namespace ResourceModLoader.Utils
 {
@@ -386,7 +387,7 @@ namespace ResourceModLoader.Utils
             List<List<PatchEntry>> patches = new List<List<PatchEntry>>();
             foreach (string file in bundles)
             {
-                Log.StepProgress(file, 1);
+                Log.Debug("开始合并bundle:"+file);
                 var r = PatchBundle(manager,bundle, assets, file, patched, resSRec, save + ".temp1", conflictResults,isDebugMode);
                 if (r == null)
                 {
@@ -400,13 +401,11 @@ namespace ResourceModLoader.Utils
                 Log.Info($"从 {file} 提取和替换了共 {r.Count} 个文件");
             }
             if (!result) {
-                Log.FinalizeProgress();
                 return new Tuple<bool, List<Tuple<string, string, string>>>(result, conflictResults);
             }
             if (post != null)
                 post(manager,bundle, assets, patched,patches);
 
-            Log.FinalizeProgress();
 
             foreach (var pl in patches)
                 foreach (var entry in pl)
@@ -448,7 +447,7 @@ namespace ResourceModLoader.Utils
             if (resSRec != null)
                 ABMergeTransformStreamData(save, resSRec, patches,isDebugMode);
             else
-                File.Move(save + ".preload", save + ".uncompressed");
+                File.Move(save + ".preload", save + ".uncompressed", true);
 
             using FileStream fsr = File.OpenRead(save + ".uncompressed");
             AssetsFileReader bundleRead = new AssetsFileReader(fsr);
@@ -522,12 +521,22 @@ namespace ResourceModLoader.Utils
                         continue;
                     var originalContainers = GetContainerDic(manager, asset);
 
+                    Log.SetupProgress(assets.Length);
                     foreach (var incomingFile in incomingAssetsFile.AssetInfos)
                     {
-                        if (incomingFile.TypeId == (int)AssetClassID.AssetBundle) continue;
+                        if (incomingFile.TypeId == (int)AssetClassID.AssetBundle)
+                        {
+                            Log.StepProgress("Bundle Manifest");
+                            continue;
+                        }
                         FieldTree iField = incomingManager.GetBaseField(incomingAsset, incomingFile);
                         var iName = iField["m_Name"];
-                        if (iName.IsDummy) continue;
+                        if (iName.IsDummy)
+                        {
+                            Log.StepProgress("<NoName>");
+                            continue;
+                        }
+                        Log.StepProgress("File "+iName.AsString);
 
                         bool needCreate = true;
                         //原有文件遍历
@@ -563,8 +572,19 @@ namespace ResourceModLoader.Utils
                                     conflictResults.Add(new Tuple<string, string, string>(iName.AsString, toLoad, patched[ai][file.PathId]));
                                     continue;
                                 }
-
-                                if (incomingFile.TypeId == 114)
+                                var specialProcessor=SpecialManager.GetSpecialProcessor(incomingFile, iField);
+                                if (specialProcessor != null)
+                                {
+                                    if (specialProcessor.Handle(iField, oField))
+                                    {
+                                        file.SetNewData(oField.Root);
+                                        result.Add(new PatchEntry { FileIndex = ai, Data = null, PathId = file.PathId, ScriptIndex = 0, TypeId = 0 });
+                                        needCreate = false;
+                                        break;
+                                    }
+                                    continue;
+                                }
+                                else if (incomingFile.TypeId == 114)
                                 {
                                     if (!IsTypeTreeMatch(incomingFile, incomingAssetsFile, file, asset.file))
                                     {
@@ -636,6 +656,7 @@ namespace ResourceModLoader.Utils
                             }
                         }
                     }
+                    Log.FinalizeProgress();
                 }
             }
             if (localTmp != "")

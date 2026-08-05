@@ -1,5 +1,6 @@
 using AssetsTools.NET;
 using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -97,7 +98,36 @@ namespace ResourceModLoader.Utils
             }
             else if (!sHasChildren && !tHasChildren)
             {
-                target.Value = source.Value.Clone();
+                if (source.Value.ValueType == AssetValueType.ManagedReferencesRegistry)
+                {
+                    var sv = source.Value.AsManagedReferencesRegistry;
+                    List<AssetTypeReferencedObject> references = new List<AssetTypeReferencedObject>();
+                    for (int i = 0; i < sv.references.Count; i++)
+                    {
+                        AssetTypeReferencedObject origReference = sv.references[i];
+                        references.Add(new AssetTypeReferencedObject
+                        {
+                            rid = origReference.rid,
+                            type = new AssetTypeReference
+                            {
+                                ClassName = origReference.type.ClassName,
+                                Namespace = origReference.type.Namespace,
+                                AsmName = origReference.type.AsmName
+                            },
+                            data = origReference.data?.Clone()
+                        });
+                    }
+
+                    target.Value = new AssetTypeValue(source.Value.ValueType, new ManagedReferencesRegistry
+                    {
+                        version = sv.version,
+                        references = references
+                    });
+                }
+                else
+                {
+                    target.Value = source.Value.Clone();
+                }
             }
         }
 
@@ -194,6 +224,19 @@ namespace ResourceModLoader.Utils
                     if (baA == null && baB == null) return true;
                     if (baA == null || baB == null) return false;
                     return baA.SequenceEqual(baB);
+                case AssetValueType.ManagedReferencesRegistry:
+                    var rA = a.AsManagedReferencesRegistry;
+                    var rB = b.AsManagedReferencesRegistry;
+                    if( rA == null || rB == null || rA.version != rB.version) return false;
+                    if(rA.references.Count != rB.references.Count) return false;
+                    for(int i=0;i< rA.references.Count; i++)
+                    {
+                        var rrA = rA.references[i];
+                        var rrB = rB.references[i];
+                        if(rrA.rid != rrB.rid|| !rrA.type.Equals(rrB.type)) return false;
+                        if(!CompareInternal(rrA.data, rrB.data)) return false;
+                    }
+                    return true;
                 default:
                     return true;
             }
