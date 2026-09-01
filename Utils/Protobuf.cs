@@ -251,6 +251,11 @@ namespace ResourceModLoader.Utils
         private Dictionary<int, List<ReaderBase>> _sub;
         private string _string;
 
+        /// <summary>Tag → field number remap: when RML reads wire tag N, treat it as field M.</summary>
+        public static Dictionary<int, int> TagRemap = new Dictionary<int, int>();
+        /// <summary>Reverse remap: when serializing field M, write original tag N instead of default.</summary>
+        public static Dictionary<int, int> ReverseTagRemap = new Dictionary<int, int>();
+
         public ReaderMessage(byte[] buffer, string path = "0", ReaderBase? parent = null)
             : base(buffer, WireTypes.LEN, path, parent)
         {
@@ -321,6 +326,10 @@ namespace ResourceModLoader.Utils
                         ulong indexType = ReadVarInt();
                         int type = (int)(indexType & 7);
                         int index = (int)(indexType >> 3);
+
+                        // Tag remap: redirect field N → field M
+                        if (TagRemap.TryGetValue(index, out int remapped))
+                            index = remapped;
 
                         if (!_fields.ContainsKey(index))
                             _fields[index] = 0;
@@ -486,8 +495,12 @@ namespace ResourceModLoader.Utils
                 foreach (var value in values)
                 {
                     WireTypes wireType = value.Type;
-                    // 写入tag
-                    uint tag = (uint)((fieldNum << 3) | (int)wireType);
+                    // 写入tag（支持反向remap：field → original tag）
+                    uint tag;
+                    if (ReverseTagRemap.TryGetValue(fieldNum, out int originalTag))
+                        tag = (uint)originalTag;
+                    else
+                        tag = (uint)((fieldNum << 3) | (int)wireType);
                     WriteVarInt(stream, tag);
 
                     // 写入数据
